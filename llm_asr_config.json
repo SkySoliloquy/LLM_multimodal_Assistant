@@ -1,0 +1,23 @@
+{
+  "sensevoice": {
+    "model_dir": "C:\\Users\\Administrator\\.cache\\modelscope\\hub\\models\\iic\\SenseVoiceSmall",
+    "device": "cuda:0",
+    "language": "auto",
+    "use_itn": true
+  },
+  "api": {
+    "host": "localhost",
+    "port": 50000,
+    "base_url": "http://localhost:50000"
+  },
+  "llm": {
+    "type": "custom",
+    "model_name": "your_llm_model",
+    "api_key": "your_api_key"
+  },
+  "audio": {
+    "sample_rate": 16000,
+    "chunk_size": 1024,
+    "channels": 1
+  }
+}
