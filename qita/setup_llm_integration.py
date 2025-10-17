@@ -88,7 +88,7 @@ def create_config_file():
         }
     }
     
-    config_file = "llm_asr_config.json"
+    config_file = "../llm_asr_config.json"
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     
