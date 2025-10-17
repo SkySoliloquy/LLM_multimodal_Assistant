@@ -16,6 +16,9 @@ from chat_manager import ChatManager
 from asr_client import SenseVoiceASRDirect
 from audio_recorder import AudioRecorder
 from llm_client import LLMClient
+from gpt_sovits_client import GPTSoVITSClient
+from realtime_voice_recorder import RealtimeVoiceRecorder
+from streaming_tts_manager import StreamingTTSManager
 from common_utils import print_section, format_duration, print_file_info
 
 
@@ -62,11 +65,49 @@ class VoiceChatSystem:
             min_duration=audio_config["min_duration"]
         )
         
+        # 初始化TTS客户端
+        tts_config = Config.get_tts_config()
+        self.tts_client = GPTSoVITSClient(api_url=tts_config["api_url"])
+        self.tts_enabled = tts_config["enabled"]
+        self.tts_auto_play = tts_config["auto_play"]
+        self.tts_config = tts_config
+        
+        # 初始化实时语音录制器
+        realtime_config = Config.get_realtime_voice_config()
+        self.realtime_voice_enabled = realtime_config["enabled"]
+        self.realtime_voice_recorder = RealtimeVoiceRecorder(
+            sample_rate=16000,
+            silence_threshold=realtime_config["silence_threshold"],
+            min_speech_length=realtime_config["min_speech_length"],
+            max_speech_length=realtime_config["max_speech_length"]
+        )
+        
+        # 初始化流式TTS管理器
+        streaming_config = Config.get_streaming_tts_config()
+        self.streaming_tts_enabled = streaming_config["enabled"]
+        self.streaming_tts_manager = StreamingTTSManager(
+            tts_client=self.tts_client,
+            chunk_size=streaming_config["chunk_size"],
+            min_chunk_size=streaming_config["min_chunk_size"],
+            max_chunk_size=streaming_config["max_chunk_size"],
+            split_punctuation=streaming_config["split_punctuation"],
+            overlap_chars=streaming_config["overlap_chars"]
+        )
+        
+        # 设置实时语音回调
+        self._setup_realtime_voice_callbacks()
+        
+        # 设置流式TTS回调
+        self._setup_streaming_tts_callbacks()
+        
         # 设置音频录制器回调
         self._setup_audio_callbacks()
         
         # 获取UI配置
         self.ui_config = Config.get_ui_config()
+        
+        # 流式TTS状态
+        self.is_streaming_response = False
         
     def _setup_audio_callbacks(self):
         """设置音频录制器回调函数"""
@@ -83,6 +124,49 @@ class VoiceChatSystem:
             on_start=on_recording_start,
             on_stop=on_recording_stop,
             on_processed=on_audio_processed
+        )
+    
+    def _setup_realtime_voice_callbacks(self):
+        """设置实时语音回调函数"""
+        def on_speech_start():
+            print("🗣️ 检测到语音开始...")
+            # 显示当前语音检测状态
+            status = self.realtime_voice_recorder.get_status()
+            print(f"   语音检测状态: 能量阈值={status.get('energy_threshold', 'N/A')}")
+        
+        def on_speech_end(audio_data: np.ndarray):
+            print("⏹️ 语音结束，开始识别...")
+            # 显示语音段信息
+            duration = len(audio_data) / 16000
+            print(f"   语音段长度: {duration:.2f}秒")
+            self._process_realtime_audio(audio_data)
+        
+        def on_audio_data(audio_data: np.ndarray):
+            # 可以在这里进行实时音频处理
+            pass
+        
+        self.realtime_voice_recorder.set_callbacks(
+            on_speech_start=on_speech_start,
+            on_speech_end=on_speech_end,
+            on_audio_data=on_audio_data
+        )
+    
+    def _setup_streaming_tts_callbacks(self):
+        """设置流式TTS回调函数"""
+        def on_text_chunk(chunk: str):
+            print(f"📝 流式文本块: {chunk}")
+        
+        def on_audio_ready(audio_path: str):
+            print(f"🎵 音频就绪: {audio_path}")
+        
+        def on_playback_complete():
+            print("✅ 流式播放完成")
+            self.is_streaming_response = False
+        
+        self.streaming_tts_manager.set_callbacks(
+            on_text_chunk=on_text_chunk,
+            on_audio_ready=on_audio_ready,
+            on_playback_complete=on_playback_complete
         )
     
     def _process_audio(self, audio_data: np.ndarray):
@@ -115,15 +199,52 @@ class VoiceChatSystem:
         except Exception as e:
             print(f"❌ 处理音频失败: {e}")
     
+    def _process_realtime_audio(self, audio_data: np.ndarray):
+        """处理实时语音数据"""
+        try:
+            # 语音转文字
+            print("🔄 正在转录音频...")
+            asr_start_time = time.time()
+            
+            asr_result = self.asr.transcribe_audio_data(
+                audio_data, 
+                sample_rate=16000, 
+                language="auto"
+            )
+            
+            asr_end_time = time.time()
+            asr_duration = asr_end_time - asr_start_time
+            
+            if "error" in asr_result:
+                print(f"❌ 语音识别失败: {asr_result['error']}")
+                return
+            
+            transcribed_text = asr_result["clean_text"]
+            print(f"✅ 识别结果: {transcribed_text}")
+            print(f"⏱️ ASR耗时: {format_duration(asr_duration)}")
+
+
+            # 发送给LLM,添加过滤器
+            import filtered_input as fi
+
+            if fi.filter_symbol(transcribed_text):
+                self._chat_with_llm(transcribed_text)
+
+
+        except Exception as e:
+            print(f"❌ 处理实时音频失败: {e}")
+    
     def _chat_with_llm(self, user_message: str):
-        """与LLM对话（支持多轮对话）"""
+        """与LLM对话（支持多轮对话和流式TTS）"""
         # 添加用户消息到对话历史
         self.chat_manager.add_user_message(user_message)
         
         # 调用LLM客户端
         result = self.llm_client.chat_completion(
             messages=self.chat_manager.get_messages(),
-            stream=True
+            stream=True,
+            on_content=self._on_llm_content if self.streaming_tts_enabled and self.tts_enabled else None,
+            on_complete=self._on_llm_complete
         )
         
         if result["success"]:
@@ -133,8 +254,29 @@ class VoiceChatSystem:
             # 显示对话轮次信息
             if self.ui_config["show_stats"]:
                 print(f"对话轮次: {self.chat_manager.get_conversation_rounds()}")
+            
+            # 如果启用了TTS但未使用流式模式，进行传统语音合成
+            if self.tts_enabled and not self.streaming_tts_enabled:
+                self._synthesize_speech(result["content"])
         else:
             print(f"❌ LLM对话失败: {result.get('error', '未知错误')}")
+    
+    def _on_llm_content(self, content: str):
+        """LLM流式内容回调"""
+        if self.streaming_tts_enabled and self.tts_enabled:
+            # 如果还没开始流式处理，启动它
+            if not self.is_streaming_response:
+                self.is_streaming_response = True
+                self.streaming_tts_manager.start_streaming()
+            
+            # 将内容添加到流式TTS管理器
+            self.streaming_tts_manager.add_text(content)
+    
+    def _on_llm_complete(self, result: dict):
+        """LLM完成回调"""
+        if result["success"] and self.streaming_tts_enabled and self.tts_enabled:
+            # 停止流式TTS处理
+            self.streaming_tts_manager.stop_streaming()
     
     def run(self):
         """运行语音对话系统（支持多轮对话）"""
@@ -142,12 +284,18 @@ class VoiceChatSystem:
         
         keys = self.ui_config["keys"]
         print(f"🎤 按 '{keys['record']}' 键开始录音，松开停止")
+        print(f"🗣️ 按 '{keys['toggle_realtime']}' 键切换实时语音模式 (当前: {'开启' if self.realtime_voice_enabled else '关闭'})")
         print(f"⌨️  按 '{keys['text_input']}' 键输入文字对话")
         print(f"📜 按 '{keys['show_history']}' 键查看对话历史")
         print(f"🗑️  按 '{keys['clear_history']}' 键清空对话历史")
+        print(f"🔊 按 '{keys['toggle_tts']}' 键切换TTS开关 (当前: {'开启' if self.tts_enabled else '关闭'})")
+        print(f"📡 流式TTS: {'开启' if self.streaming_tts_enabled else '关闭'}")
         print(f"❌ 按 '{keys['quit']}' 键退出程序")
         print_section("", "=", 60)
         print()
+        
+        # 注意：实时语音不会在启动时自动开启，需要用户手动按r键开启
+        print("💡 提示：按 'r' 键可开启实时语音模式")
         
         try:
             while True:
@@ -166,6 +314,12 @@ class VoiceChatSystem:
                     self.chat_manager.clear_history()
                     print("\n✅ 对话历史已清空")
                     time.sleep(0.5)  # 防止重复触发
+                elif keyboard.is_pressed(keys['toggle_tts']):
+                    self._toggle_tts()
+                    time.sleep(0.5)  # 防止重复触发
+                elif keyboard.is_pressed(keys['toggle_realtime']):
+                    self._toggle_realtime_voice()
+                    time.sleep(0.5)  # 防止重复触发
                 elif keyboard.is_pressed(keys['quit']):
                     print("\n👋 退出程序")
                     break
@@ -175,8 +329,15 @@ class VoiceChatSystem:
         except KeyboardInterrupt:
             print("\n👋 程序被中断")
         finally:
+            # 清理资源
             if self.audio_recorder.is_recording_active():
                 self.audio_recorder.stop_recording()
+            
+            if self.realtime_voice_recorder.is_active():
+                self.realtime_voice_recorder.stop_recording()
+            
+            if self.streaming_tts_manager.is_processing:
+                self.streaming_tts_manager.stop_streaming()
     
     def _handle_text_input(self):
         """处理文字输入"""
@@ -202,6 +363,215 @@ class VoiceChatSystem:
         
         print(f"\n📝 用户输入: {user_input}")
         self._chat_with_llm(user_input)
+    
+    def _synthesize_speech(self, text: str):
+        """合成语音"""
+        if not self.tts_enabled:
+            return
+        
+        try:
+            print("\n🎙️ 正在合成语音...")
+            tts_start_time = time.time()
+            
+            # 生成唯一的输出文件名，避免文件冲突
+            timestamp = int(time.time())
+            output_path = f"tts_output_{timestamp}.wav"
+            
+            # 预处理文本：处理长句子
+            processed_text = self._preprocess_text_for_tts(text)
+            
+            # 调用TTS客户端（带重试机制）
+            success = self._tts_with_retry(
+                text=processed_text,
+                output_path=output_path,
+                max_retries=self.tts_config["retry_count"]
+            )
+            
+            tts_end_time = time.time()
+            tts_duration = tts_end_time - tts_start_time
+            
+            if success:
+                print(f"✅ 语音合成成功! 耗时: {format_duration(tts_duration)}")
+                
+                # 如果启用自动播放，播放合成的语音
+                if self.tts_auto_play:
+                    self._play_audio(output_path)
+            else:
+                print(f"❌ 语音合成失败")
+                # 清理可能创建的文件
+                self._cleanup_file(output_path)
+                
+        except Exception as e:
+            print(f"❌ TTS合成异常: {e}")
+            # 清理可能创建的文件
+            if 'output_path' in locals():
+                self._cleanup_file(output_path)
+    
+    def _play_audio(self, audio_path: str):
+        """播放音频文件"""
+        try:
+            import pygame
+            import threading
+            
+            def play_audio_thread():
+                try:
+                    pygame.mixer.init()
+                    pygame.mixer.music.load(audio_path)
+                    pygame.mixer.music.play()
+                    
+                    # 等待播放完成
+                    while pygame.mixer.music.get_busy():
+                        time.sleep(0.1)
+                    
+                    # 播放完成后清理文件
+                    pygame.mixer.music.unload()
+                    self._cleanup_file(audio_path)
+                    
+                except Exception as e:
+                    print(f"❌ 音频播放线程异常: {e}")
+                    self._cleanup_file(audio_path)
+            
+            # 在后台线程中播放音频，避免阻塞主程序
+            audio_thread = threading.Thread(target=play_audio_thread, daemon=True)
+            audio_thread.start()
+            
+        except ImportError:
+            print("⚠️ 未安装pygame，无法自动播放音频")
+            print(f"   音频文件已保存到: {audio_path}")
+        except Exception as e:
+            print(f"❌ 播放音频失败: {e}")
+            print(f"   音频文件已保存到: {audio_path}")
+    
+    def _preprocess_text_for_tts(self, text: str) -> str:
+        """预处理文本以提高TTS合成成功率"""
+        # 移除多余的空白字符
+        processed = text.strip()
+        
+        # 如果文本过长，进行分段处理
+        max_length = self.tts_config["max_text_length"]
+        if len(processed) > max_length:
+            print(f"⚠️ 文本较长({len(processed)}字符)，将进行分段处理")
+            
+            # 按句号、问号、感叹号分段
+            sentences = []
+            current_sentence = ""
+            
+            for char in processed:
+                current_sentence += char
+                if char in '。！？.!?':
+                    if len(current_sentence.strip()) > 0:
+                        sentences.append(current_sentence.strip())
+                    current_sentence = ""
+            
+            # 处理最后一段（如果没有标点结尾）
+            if current_sentence.strip():
+                sentences.append(current_sentence.strip())
+            
+            # 选择前几个句子，确保总长度不超过限制
+            selected_sentences = []
+            total_length = 0
+            
+            for sentence in sentences:
+                if total_length + len(sentence) <= max_length:
+                    selected_sentences.append(sentence)
+                    total_length += len(sentence)
+                else:
+                    break
+            
+            if selected_sentences:
+                processed = ''.join(selected_sentences)
+                if len(sentences) > len(selected_sentences):
+                    processed += "..."
+            else:
+                # 如果没有句子，直接截取前max_length个字符
+                processed = processed[:max_length-3] + "..."
+        
+        return processed
+    
+    def _tts_with_retry(self, text: str, output_path: str, max_retries: int = 2) -> bool:
+        """带重试机制的TTS合成"""
+        for attempt in range(max_retries + 1):
+            try:
+                # 如果文本过长，在重试时进一步缩短
+                if attempt > 0 and len(text) > 100:
+                    print(f"🔄 重试第{attempt}次，缩短文本长度")
+                    text = text[:100] + "..."
+                
+                success = self.tts_client.text_to_speech(
+                    text=text,
+                    ref_audio_path=self.tts_config["ref_audio_path"],
+                    output_path=output_path,
+                    text_lang=self.tts_config["text_lang"],
+                    prompt_lang=self.tts_config["prompt_lang"],
+                    prompt_text=self.tts_config["prompt_text"],
+                    top_k=5,
+                    top_p=0.8,
+                    temperature=0.8,
+                    speed_factor=1.0,
+                    text_split_method="cut4",
+                    batch_size=1,
+                    sample_steps=4
+                )
+                
+                if success:
+                    return True
+                else:
+                    print(f"⚠️ 第{attempt + 1}次尝试失败")
+                    if attempt < max_retries:
+                        time.sleep(1)  # 等待1秒后重试
+                        
+            except Exception as e:
+                print(f"⚠️ 第{attempt + 1}次尝试异常: {e}")
+                if attempt < max_retries:
+                    time.sleep(1)  # 等待1秒后重试
+        
+        return False
+    
+    def _cleanup_file(self, file_path: str):
+        """清理临时文件"""
+        try:
+            import os
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            print(f"⚠️ 清理文件失败: {e}")
+    
+    def _toggle_tts(self):
+        """切换TTS开关"""
+        self.tts_enabled = not self.tts_enabled
+        status = "开启" if self.tts_enabled else "关闭"
+        print(f"\n🔊 TTS功能已{status}")
+        
+        if self.tts_enabled:
+            print("   下次LLM回复时将自动进行语音合成")
+        else:
+            print("   LLM回复将不再进行语音合成")
+    
+    def _toggle_realtime_voice(self):
+        """切换实时语音模式"""
+        try:
+            self.realtime_voice_enabled = not self.realtime_voice_enabled
+            status = "开启" if self.realtime_voice_enabled else "关闭"
+            print(f"\n🗣️ 实时语音模式已{status}")
+            
+            if self.realtime_voice_enabled:
+                # 确保按键录音已停止
+                if self.audio_recorder.is_recording_active():
+                    self.audio_recorder.stop_recording()
+                
+                # 启动实时语音录制
+                self.realtime_voice_recorder.start_recording()
+                print("   开始监听语音输入，检测到语音会自动识别")
+                print("   💡 提示：请确保环境相对安静，说话清晰")
+            else:
+                # 停止实时语音录制
+                self.realtime_voice_recorder.stop_recording()
+                print("   停止监听语音输入，请使用按键录音或文字输入")
+                
+        except Exception as e:
+            print(f"❌ 切换实时语音模式失败: {e}")
+            # 重置状态
+            self.realtime_voice_enabled = False
 
 def main():
     """主函数"""
@@ -212,11 +582,13 @@ def main():
         print(f"❌ 程序启动失败: {e}")
         print("请确保:")
         print("1. SenseVoice模型已正确下载到指定路径")
-        print("2. 已安装所需依赖: pip install pyaudio keyboard torch torchaudio funasr openai numpy")
+        print("2. 已安装所需依赖: pip install pyaudio keyboard torch torchaudio funasr openai numpy pygame requests")
         print("3. 麦克风权限已开启")
         print("4. GPU可用或修改config.py中的device参数为'cpu'")
         print("5. System_Content.txt文件存在且可读")
         print("6. 检查config.py中的API配置是否正确")
+        print("7. GPT-SoVITS API服务已启动 (如使用TTS功能)")
+        print("8. 参考音频文件路径正确 (如使用TTS功能)")
 
 
 if __name__ == "__main__":

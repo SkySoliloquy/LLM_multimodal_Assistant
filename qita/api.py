@@ -8,7 +8,7 @@ from typing_extensions import Annotated
 from typing import List
 from enum import Enum
 import torchaudio
-from model import SenseVoiceSmall
+from qita.model import SenseVoiceSmall
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 from io import BytesIO
 

@@ -5,7 +5,7 @@
 
 import os
 import torch
-from model import SenseVoiceSmall
+from qita.model import SenseVoiceSmall
 from utils import export_utils
 from utils.model_bin import SenseVoiceSmallONNX
 from funasr.utils.postprocess_utils import rich_transcription_postprocess

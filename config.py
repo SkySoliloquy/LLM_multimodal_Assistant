@@ -20,7 +20,7 @@ class Config:
     # LLM配置
     LLM_API_KEY = "YDHHpjDZwdGh7SBOgNGn50_LcNLnCpq84tjZ_fRECrs7wwoOG4SWNPyRPsX1Z7Zj7hFZgiJW2MqzDGIl98U-7Q"
     LLM_BASE_URL = "https://www.sophnet.com/api/open-apis/v1"
-    LLM_MODEL_NAME = "DeepSeek-V3.2-Exp"
+    LLM_MODEL_NAME = "DeepSeek-V3.1-Fast"
     
     # 系统提示词文件路径
     SYSTEM_PROMPT_FILE = "System_Content.txt"
@@ -40,11 +40,40 @@ class Config:
     UI_SHOW_HISTORY_PREVIEW = True
     UI_HISTORY_PREVIEW_LENGTH = 50
     
+    # GPT-SoVITS TTS配置
+    TTS_API_URL = "http://127.0.0.1:9880"
+    TTS_REF_AUDIO_PATH = "参考音频.wav"
+    TTS_OUTPUT_PATH = "output.wav"
+    TTS_TEXT_LANG = "zh"
+    TTS_PROMPT_LANG = "zh"
+    TTS_PROMPT_TEXT = "伊里奥斯的古代废墟是受国际保护的历史遗址。"
+    TTS_ENABLED = True  # 是否启用TTS功能
+    TTS_AUTO_PLAY = True  # 是否自动播放合成的语音
+    TTS_MAX_TEXT_LENGTH = 200  # 最大文本长度，超出会分段处理
+    TTS_RETRY_COUNT = 2  # 重试次数
+    TTS_TIMEOUT = 300  # 超时时间（秒）
+    
+    # 实时语音配置
+    REALTIME_VOICE_ENABLED = True  # 是否启用实时语音功能
+    REALTIME_VOICE_SILENCE_THRESHOLD = 0.8  # 静音检测阈值（秒）- 增加以避免过早结束
+    REALTIME_VOICE_MIN_SPEECH_LENGTH = 0.5  # 最小语音长度（秒）- 增加以避免误触发
+    REALTIME_VOICE_MAX_SPEECH_LENGTH = 30.0  # 最大语音长度（秒）
+    
+    # 流式TTS配置
+    STREAMING_TTS_ENABLED = True  # 是否启用流式TTS
+    STREAMING_TTS_CHUNK_SIZE = 30  # 每次传给TTS的字符数
+    STREAMING_TTS_MIN_CHUNK_SIZE = 10  # 最小字符数
+    STREAMING_TTS_MAX_CHUNK_SIZE = 50  # 最大字符数
+    STREAMING_TTS_SPLIT_PUNCTUATION = '。！？.!?，,;；'  # 切分标点符号
+    STREAMING_TTS_OVERLAP_CHARS = 3  # 语音片段重叠字符数
+    
     # 按键配置
     KEY_RECORD = 'z'
     KEY_TEXT_INPUT = 't'
     KEY_SHOW_HISTORY = 'h'
     KEY_CLEAR_HISTORY = 'c'
+    KEY_TOGGLE_TTS = 'v'  # 切换TTS开关
+    KEY_TOGGLE_REALTIME = 'r'  # 切换实时语音模式
     KEY_QUIT = 'q'
     
     @classmethod
@@ -86,6 +115,45 @@ class Config:
         }
     
     @classmethod
+    def get_tts_config(cls) -> Dict[str, Any]:
+        """获取TTS配置"""
+        return {
+            "api_url": cls.TTS_API_URL,
+            "ref_audio_path": cls.TTS_REF_AUDIO_PATH,
+            "output_path": cls.TTS_OUTPUT_PATH,
+            "text_lang": cls.TTS_TEXT_LANG,
+            "prompt_lang": cls.TTS_PROMPT_LANG,
+            "prompt_text": cls.TTS_PROMPT_TEXT,
+            "enabled": cls.TTS_ENABLED,
+            "auto_play": cls.TTS_AUTO_PLAY,
+            "max_text_length": cls.TTS_MAX_TEXT_LENGTH,
+            "retry_count": cls.TTS_RETRY_COUNT,
+            "timeout": cls.TTS_TIMEOUT
+        }
+    
+    @classmethod
+    def get_realtime_voice_config(cls) -> Dict[str, Any]:
+        """获取实时语音配置"""
+        return {
+            "enabled": cls.REALTIME_VOICE_ENABLED,
+            "silence_threshold": cls.REALTIME_VOICE_SILENCE_THRESHOLD,
+            "min_speech_length": cls.REALTIME_VOICE_MIN_SPEECH_LENGTH,
+            "max_speech_length": cls.REALTIME_VOICE_MAX_SPEECH_LENGTH
+        }
+    
+    @classmethod
+    def get_streaming_tts_config(cls) -> Dict[str, Any]:
+        """获取流式TTS配置"""
+        return {
+            "enabled": cls.STREAMING_TTS_ENABLED,
+            "chunk_size": cls.STREAMING_TTS_CHUNK_SIZE,
+            "min_chunk_size": cls.STREAMING_TTS_MIN_CHUNK_SIZE,
+            "max_chunk_size": cls.STREAMING_TTS_MAX_CHUNK_SIZE,
+            "split_punctuation": cls.STREAMING_TTS_SPLIT_PUNCTUATION,
+            "overlap_chars": cls.STREAMING_TTS_OVERLAP_CHARS
+        }
+    
+    @classmethod
     def get_ui_config(cls) -> Dict[str, Any]:
         """获取UI配置"""
         return {
@@ -97,6 +165,8 @@ class Config:
                 "text_input": cls.KEY_TEXT_INPUT,
                 "show_history": cls.KEY_SHOW_HISTORY,
                 "clear_history": cls.KEY_CLEAR_HISTORY,
+                "toggle_tts": cls.KEY_TOGGLE_TTS,
+                "toggle_realtime": cls.KEY_TOGGLE_REALTIME,
                 "quit": cls.KEY_QUIT
             }
         }
