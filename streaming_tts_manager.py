@@ -18,9 +18,9 @@ class StreamingTTSManager:
     
     def __init__(self, 
                  tts_client: GPTSoVITSClient,
-                 chunk_size: int = 40,
+                 chunk_size: int = 30,
                  min_chunk_size: int = 10,
-                 max_chunk_size: int = 80,
+                 max_chunk_size: int = 50,
                  split_punctuation: str = '。！？.!?，,;；',
                  overlap_chars: int = 3):
         """
@@ -122,8 +122,8 @@ class StreamingTTSManager:
         # 更新统计信息
         self.stats["total_characters"] += len(text)
         
-        print(f"📝 添加文本: {text[:30]}... (总长度: {len(self.text_buffer)})")
-    
+        #print(f"📝 添加文本: {text[:30]}... (总长度: {len(self.text_buffer)})\n")
+
     def _processing_loop(self):
         """处理循环"""
         while not self.stop_event.is_set():
@@ -131,65 +131,102 @@ class StreamingTTSManager:
                 if len(self.text_buffer) - self.processed_length >= self.min_chunk_size:
                     # 检查是否可以切分
                     next_chunk = self._get_next_chunk()
-                    
+
                     if next_chunk:
                         self._process_chunk(next_chunk)
-                
+
                 time.sleep(0.1)  # 避免CPU占用过高
-                
+
             except Exception as e:
                 print(f"❌ 处理循环异常: {e}")
                 break
-    
+
     def _get_next_chunk(self) -> Optional[str]:
         """获取下一个文本块"""
         if self.processed_length >= len(self.text_buffer):
             return None
-        
-        # 从已处理位置开始，不使用重叠
+
+        # 从已处理位置开始
         start_pos = self.processed_length
-        end_pos = start_pos + self.chunk_size
-        
-        # 如果文本不够长，取剩余部分
-        if end_pos >= len(self.text_buffer):
-            chunk = self.text_buffer[start_pos:]
-            return chunk if chunk.strip() else None
-        
-        # 寻找合适的切分点
-        chunk = self.text_buffer[start_pos:end_pos]
-        
-        # 向后寻找标点符号（句号、问号、感叹号优先）
-        best_split = -1
-        for i in range(len(chunk) - 1, -1, -1):
-            if chunk[i] in '。！？.!?':
-                best_split = i
-                break
-            elif chunk[i] in '，,;；' and best_split == -1:
-                best_split = i
-        
-        # 如果找到合适的切分点
-        if best_split > 0:
-            end_pos = start_pos + best_split + 1
+
+        # 允许的最大查看范围（向前看，避免在句中截断）
+        preferred_end = start_pos + self.chunk_size
+        max_end = min(start_pos + self.max_chunk_size, len(self.text_buffer))
+
+        # 当前可用文本不足最小块时，暂不切分（等待更多文本到来）
+        available_len = len(self.text_buffer) - start_pos
+        if available_len < self.min_chunk_size and not self.stop_event.is_set():
+            return None
+
+        # 在 [start_pos, max_end) 范围内寻找最佳切分点
+        search_text = self.text_buffer[start_pos:max_end]
+
+        strong_punct = '。！？.!?'
+        weak_punct = '，,;；'
+
+        def find_split(text: str, prefer_len: int):
+            # 先在强标点中找：优先选择 <= prefer_len 范围内的最后一个，其次选择 > prefer_len 的第一个
+            last_before = -1
+            first_after = -1
+            for idx, ch in enumerate(text):
+                if ch in strong_punct:
+                    if idx <= prefer_len - 1:
+                        last_before = idx
+                    elif first_after == -1:
+                        first_after = idx
+            if last_before != -1:
+                return last_before + 1
+            if first_after != -1:
+                return first_after + 1
+
+            # 没有强标点，尝试弱标点，策略同上
+            last_before = -1
+            first_after = -1
+            for idx, ch in enumerate(text):
+                if ch in weak_punct:
+                    if idx <= prefer_len - 1:
+                        last_before = idx
+                    elif first_after == -1:
+                        first_after = idx
+            if last_before != -1:
+                return last_before + 1
+            if first_after != -1:
+                return first_after + 1
+
+            return -1
+
+        # 期望切分点基于 chunk_size
+        prefer_len = min(self.chunk_size, len(search_text))
+        split_offset = find_split(search_text, prefer_len)
+
+        if split_offset == -1:
+            # 若没有任何标点：
+            # 1) 如果尚未达到最大查看窗口且未停止，就等待更多文本，避免句中截断
+            if len(search_text) < (self.max_chunk_size - 0) and not self.stop_event.is_set():
+                return None
+            # 2) 若已达到最大窗口或已停止，才按窗口末尾切分
+            end_pos = start_pos + len(search_text)
             chunk = self.text_buffer[start_pos:end_pos]
-        
-        # 确保块大小在合理范围内
-        if len(chunk) < self.min_chunk_size and end_pos < len(self.text_buffer):
-            # 如果块太小，尝试扩展到下一个句号
-            extend_end = min(start_pos + self.max_chunk_size, len(self.text_buffer))
-            search_chunk = self.text_buffer[start_pos:extend_end]
-            
-            # 寻找下一个句号
-            for i in range(len(search_chunk)):
-                if search_chunk[i] in '。！？.!?':
-                    end_pos = start_pos + i + 1
-                    chunk = self.text_buffer[start_pos:end_pos]
-                    break
-            else:
-                # 如果没找到句号，使用最大长度
-                chunk = search_chunk
-        
-        return chunk.strip() if chunk.strip() else None
-    
+        else:
+            end_pos = start_pos + split_offset
+            chunk = self.text_buffer[start_pos:end_pos]
+
+        # 去除首尾空白
+        chunk = chunk.strip()
+
+        # 避免出现以弱标点开头的块（例如以“，”开头），这种情况通常来源于前一块未包含该标点。
+        # 如果不为空且首字符是弱标点，同时块长度过短，则尝试扩展一点点（不超过max_chunk_size）
+        if chunk and chunk[0] in weak_punct and (end_pos < len(self.text_buffer)):
+            # 再尝试在后续少量字符内找到一个更自然的切分点
+            extra_end = min(end_pos + (self.min_chunk_size if self.min_chunk_size > 0 else 5), len(self.text_buffer))
+            extra_search = self.text_buffer[start_pos:extra_end]
+            extra_split = find_split(extra_search, len(chunk) + 1)
+            if extra_split != -1 and extra_split > len(chunk):
+                end_pos = start_pos + extra_split
+                chunk = self.text_buffer[start_pos:end_pos].strip()
+
+        return chunk if chunk else None
+
     def _process_chunk(self, chunk: str):
         """处理文本块"""
         try:
@@ -233,7 +270,7 @@ class StreamingTTSManager:
                 output_path=output_path,
                 text_lang="zh",
                 prompt_lang="zh",
-                prompt_text="伊里奥斯的古代废墟是受国际保护的历史遗址。",
+                prompt_text="伊利奥斯的古代废墟是受国际保护的历史遗址。",
                 top_k=5,
                 top_p=0.8,
                 temperature=0.8,
@@ -247,7 +284,7 @@ class StreamingTTSManager:
             self.stats["processing_time"] += processing_time
             
             if success:
-                print(f"✅ 语音块合成成功: {chunk[:20]}... (耗时: {processing_time:.2f}秒)")
+                print(f"✅ 语音块合成成功: {chunk} (耗时: {processing_time:.2f}秒)")
                 
                 # 将音频文件加入队列
                 self.audio_queue.put(output_path)

@@ -20,7 +20,7 @@ class Config:
     # LLM配置
     LLM_API_KEY = "YDHHpjDZwdGh7SBOgNGn50_LcNLnCpq84tjZ_fRECrs7wwoOG4SWNPyRPsX1Z7Zj7hFZgiJW2MqzDGIl98U-7Q"
     LLM_BASE_URL = "https://www.sophnet.com/api/open-apis/v1"
-    LLM_MODEL_NAME = "DeepSeek-V3.1-Fast"
+    LLM_MODEL_NAME = "DeepSeek-V3-Fast"
     
     # 系统提示词文件路径
     SYSTEM_PROMPT_FILE = "System_Content.txt"
@@ -61,9 +61,9 @@ class Config:
     
     # 流式TTS配置
     STREAMING_TTS_ENABLED = True  # 是否启用流式TTS
-    STREAMING_TTS_CHUNK_SIZE = 40  # 每次传给TTS的字符数
+    STREAMING_TTS_CHUNK_SIZE = 30  # 每次传给TTS的字符数
     STREAMING_TTS_MIN_CHUNK_SIZE = 10  # 最小字符数
-    STREAMING_TTS_MAX_CHUNK_SIZE = 80  # 最大字符数
+    STREAMING_TTS_MAX_CHUNK_SIZE = 50  # 最大字符数
     STREAMING_TTS_SPLIT_PUNCTUATION = '。！？.!?，,;；'  # 切分标点符号
     STREAMING_TTS_OVERLAP_CHARS = 3  # 语音片段重叠字符数
     
@@ -145,12 +145,14 @@ class Config:
     def get_streaming_tts_config(cls) -> Dict[str, Any]:
         """获取流式TTS配置"""
         return {
+
             "enabled": cls.STREAMING_TTS_ENABLED,
             "chunk_size": cls.STREAMING_TTS_CHUNK_SIZE,
             "min_chunk_size": cls.STREAMING_TTS_MIN_CHUNK_SIZE,
             "max_chunk_size": cls.STREAMING_TTS_MAX_CHUNK_SIZE,
             "split_punctuation": cls.STREAMING_TTS_SPLIT_PUNCTUATION,
             "overlap_chars": cls.STREAMING_TTS_OVERLAP_CHARS
+
         }
     
     @classmethod

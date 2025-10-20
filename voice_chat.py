@@ -164,8 +164,9 @@ class VoiceChatSystem:
             self.is_streaming_response = False
         
         self.streaming_tts_manager.set_callbacks(
-            on_text_chunk=on_text_chunk,
-            on_audio_ready=on_audio_ready,
+            #打印信息
+            #on_text_chunk=on_text_chunk,
+            #on_audio_ready=on_audio_ready,
             on_playback_complete=on_playback_complete
         )
     
@@ -376,13 +377,11 @@ class VoiceChatSystem:
             # 生成唯一的输出文件名，避免文件冲突
             timestamp = int(time.time())
             output_path = f"tts_output_{timestamp}.wav"
-            
-            # 预处理文本：处理长句子
-            processed_text = self._preprocess_text_for_tts(text)
+
             
             # 调用TTS客户端（带重试机制）
             success = self._tts_with_retry(
-                text=processed_text,
+                text=text,
                 output_path=output_path,
                 max_retries=self.tts_config["retry_count"]
             )
@@ -442,52 +441,7 @@ class VoiceChatSystem:
             print(f"❌ 播放音频失败: {e}")
             print(f"   音频文件已保存到: {audio_path}")
     
-    def _preprocess_text_for_tts(self, text: str) -> str:
-        """预处理文本以提高TTS合成成功率"""
-        # 移除多余的空白字符
-        processed = text.strip()
-        
-        # 如果文本过长，进行分段处理
-        max_length = self.tts_config["max_text_length"]
-        if len(processed) > max_length:
-            print(f"⚠️ 文本较长({len(processed)}字符)，将进行分段处理")
-            
-            # 按句号、问号、感叹号分段
-            sentences = []
-            current_sentence = ""
-            
-            for char in processed:
-                current_sentence += char
-                if char in '。！？.!?':
-                    if len(current_sentence.strip()) > 0:
-                        sentences.append(current_sentence.strip())
-                    current_sentence = ""
-            
-            # 处理最后一段（如果没有标点结尾）
-            if current_sentence.strip():
-                sentences.append(current_sentence.strip())
-            
-            # 选择前几个句子，确保总长度不超过限制
-            selected_sentences = []
-            total_length = 0
-            
-            for sentence in sentences:
-                if total_length + len(sentence) <= max_length:
-                    selected_sentences.append(sentence)
-                    total_length += len(sentence)
-                else:
-                    break
-            
-            if selected_sentences:
-                processed = ''.join(selected_sentences)
-                if len(sentences) > len(selected_sentences):
-                    processed += "..."
-            else:
-                # 如果没有句子，直接截取前max_length个字符
-                processed = processed[:max_length-3] + "..."
-        
-        return processed
-    
+
     def _tts_with_retry(self, text: str, output_path: str, max_retries: int = 2) -> bool:
         """带重试机制的TTS合成"""
         for attempt in range(max_retries + 1):
