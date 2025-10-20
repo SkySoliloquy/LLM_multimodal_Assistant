@@ -38,6 +38,7 @@ class SenseVoiceASRDirect:
             self.model = AutoModel(
                 model=self.model_dir,
                 trust_remote_code=True,
+                disable_update=True,
                 remote_code="./model.py",
                 vad_model=self.vad_model_dir,
                 vad_kwargs={"max_single_segment_time": 30000},

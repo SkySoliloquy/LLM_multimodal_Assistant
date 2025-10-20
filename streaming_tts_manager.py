@@ -18,9 +18,9 @@ class StreamingTTSManager:
     
     def __init__(self, 
                  tts_client: GPTSoVITSClient,
-                 chunk_size: int = 30,
+                 chunk_size: int = 40,
                  min_chunk_size: int = 10,
-                 max_chunk_size: int = 50,
+                 max_chunk_size: int = 80,
                  split_punctuation: str = '。！？.!?，,;；',
                  overlap_chars: int = 3):
         """

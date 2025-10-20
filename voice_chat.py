@@ -39,7 +39,7 @@ class VoiceChatSystem:
         self.asr = SenseVoiceASRDirect(
             model_dir=asr_config["model_dir"],
             device=asr_config["device"],
-            vad_model_dir=asr_config["vad_model_dir"]
+            vad_model_dir=asr_config["vad_model_dir"],
         )
         
         # 初始化LLM客户端

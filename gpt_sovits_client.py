@@ -34,12 +34,12 @@ class GPTSoVITSClient:
         top_k=5,
         top_p=1.0,
         temperature=1.0,
-        text_split_method="cut5",
+        text_split_method="cut4",
         batch_size=1,
         speed_factor=1.0,
         streaming_mode=False,
         media_type="wav",
-        sample_steps=32,
+        sample_steps=4,
     ):
         """
         文字转语音

@@ -26,7 +26,7 @@ class Config:
     SYSTEM_PROMPT_FILE = "System_Content.txt"
     
     # 对话管理配置
-    MAX_HISTORY_ROUNDS = 10  # 最大保留的对话轮数
+    MAX_HISTORY_ROUNDS = 20  # 最大保留的对话轮数
     
     # 音频录制配置
     AUDIO_CHUNK = 1024
@@ -46,7 +46,7 @@ class Config:
     TTS_OUTPUT_PATH = "output.wav"
     TTS_TEXT_LANG = "zh"
     TTS_PROMPT_LANG = "zh"
-    TTS_PROMPT_TEXT = "伊里奥斯的古代废墟是受国际保护的历史遗址。"
+    TTS_PROMPT_TEXT = "伊利奥斯的古代废墟是受国际保护的历史遗址。"
     TTS_ENABLED = True  # 是否启用TTS功能
     TTS_AUTO_PLAY = True  # 是否自动播放合成的语音
     TTS_MAX_TEXT_LENGTH = 200  # 最大文本长度，超出会分段处理
@@ -61,9 +61,9 @@ class Config:
     
     # 流式TTS配置
     STREAMING_TTS_ENABLED = True  # 是否启用流式TTS
-    STREAMING_TTS_CHUNK_SIZE = 30  # 每次传给TTS的字符数
+    STREAMING_TTS_CHUNK_SIZE = 40  # 每次传给TTS的字符数
     STREAMING_TTS_MIN_CHUNK_SIZE = 10  # 最小字符数
-    STREAMING_TTS_MAX_CHUNK_SIZE = 50  # 最大字符数
+    STREAMING_TTS_MAX_CHUNK_SIZE = 80  # 最大字符数
     STREAMING_TTS_SPLIT_PUNCTUATION = '。！？.!?，,;；'  # 切分标点符号
     STREAMING_TTS_OVERLAP_CHARS = 3  # 语音片段重叠字符数
     
