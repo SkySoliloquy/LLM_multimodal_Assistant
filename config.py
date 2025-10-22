@@ -42,11 +42,11 @@ class Config:
     
     # GPT-SoVITS TTS配置
     TTS_API_URL = "http://127.0.0.1:9880"
-    TTS_REF_AUDIO_PATH = "参考音频.wav"
+    TTS_REF_AUDIO_PATH = r"D:\Project\SenseVoice-main\U_Offical.wav"
     TTS_OUTPUT_PATH = "output.wav"
     TTS_TEXT_LANG = "zh"
     TTS_PROMPT_LANG = "zh"
-    TTS_PROMPT_TEXT = "伊利奥斯的古代废墟是受国际保护的历史遗址。"
+    TTS_PROMPT_TEXT = "新年特别直播，用味觉巡游这片大地，各国美味佳肴。"
     TTS_ENABLED = True  # 是否启用TTS功能
     TTS_AUTO_PLAY = True  # 是否自动播放合成的语音
     TTS_MAX_TEXT_LENGTH = 200  # 最大文本长度，超出会分段处理
