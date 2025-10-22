@@ -20,7 +20,7 @@ class Config:
     # LLM配置
     LLM_API_KEY = "YDHHpjDZwdGh7SBOgNGn50_LcNLnCpq84tjZ_fRECrs7wwoOG4SWNPyRPsX1Z7Zj7hFZgiJW2MqzDGIl98U-7Q"
     LLM_BASE_URL = "https://www.sophnet.com/api/open-apis/v1"
-    LLM_MODEL_NAME = "DeepSeek-V3-Fast"
+    LLM_MODEL_NAME = "DeepSeek-V3.2-Exp"
     
     # 系统提示词文件路径
     SYSTEM_PROMPT_FILE = "System_Content.txt"
@@ -42,11 +42,11 @@ class Config:
     
     # GPT-SoVITS TTS配置
     TTS_API_URL = "http://127.0.0.1:9880"
-    TTS_REF_AUDIO_PATH = "参考音频.wav"
+    TTS_REF_AUDIO_PATH = r"D:\Project\SenseVoice-main\U_Offical.mp3"
     TTS_OUTPUT_PATH = "output.wav"
     TTS_TEXT_LANG = "zh"
     TTS_PROMPT_LANG = "zh"
-    TTS_PROMPT_TEXT = "伊利奥斯的古代废墟是受国际保护的历史遗址。"
+    TTS_PROMPT_TEXT = "新年特别直播，用味觉巡游这片大地。"
     TTS_ENABLED = True  # 是否启用TTS功能
     TTS_AUTO_PLAY = True  # 是否自动播放合成的语音
     TTS_MAX_TEXT_LENGTH = 200  # 最大文本长度，超出会分段处理
@@ -68,13 +68,13 @@ class Config:
     STREAMING_TTS_OVERLAP_CHARS = 3  # 语音片段重叠字符数
     
     # 按键配置
-    KEY_RECORD = 'z'
-    KEY_TEXT_INPUT = 't'
-    KEY_SHOW_HISTORY = 'h'
-    KEY_CLEAR_HISTORY = 'c'
-    KEY_TOGGLE_TTS = 'v'  # 切换TTS开关
-    KEY_TOGGLE_REALTIME = 'r'  # 切换实时语音模式
-    KEY_QUIT = 'q'
+    KEY_RECORD = 'num 5'
+    KEY_TEXT_INPUT = 'num 4'
+    KEY_SHOW_HISTORY = 'num 0'#查看历史
+    KEY_CLEAR_HISTORY = 'num 1'#清除历史
+    KEY_TOGGLE_TTS = 'num 7'  # 切换TTS开关
+    KEY_TOGGLE_REALTIME = 'num 8'  # 切换实时语音模式
+    KEY_QUIT = 'num 9'
     
     @classmethod
     def get_asr_config(cls) -> Dict[str, Any]:
