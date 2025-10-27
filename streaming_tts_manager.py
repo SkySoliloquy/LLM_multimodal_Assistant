@@ -266,15 +266,17 @@ class StreamingTTSManager:
             # 调用TTS合成
             success = self.tts_client.text_to_speech(
                 text=chunk,
-                ref_audio_path=r"D:\Project\SenseVoice-main\U_Offical.mp3",  # 使用固定的参考音频路径
+                #ref_audio_path=r"D:\Project\SenseVoice-main\U_Offical.mp3",  # 使用固定的参考音频路径
+                ref_audio_path="D:\Project\SenseVoice-main\Athna.wav",
                 output_path=output_path,
                 text_lang="zh",
                 prompt_lang="zh",
-                prompt_text="新年特别直播，用味觉巡游这片大地。",
+                #prompt_text="新年特别直播，用味觉巡游这片大地。",
+                prompt_text="伊利奥斯的古代废墟是受国际保护的历史遗址。",
                 top_k=10,
                 top_p=0.8,
                 temperature=1,
-                speed_factor=0.95,
+                speed_factor=1,
                 text_split_method="cut4",
                 batch_size=4,
                 sample_steps=4
