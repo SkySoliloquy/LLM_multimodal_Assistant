@@ -20,6 +20,7 @@ from gpt_sovits_client import GPTSoVITSClient
 from realtime_voice_recorder import RealtimeVoiceRecorder
 from streaming_tts_manager import StreamingTTSManager
 from common_utils import print_section, format_duration, print_file_info
+from TimeToplevel import Stopwatch, show_time_popup
 
 
 class VoiceChatSystem:
@@ -108,6 +109,11 @@ class VoiceChatSystem:
 
         # 流式TTS状态
         self.is_streaming_response = False
+        self.should_include_interrupt_context = False  # 是否需要在下次对话中包含中断信息
+        
+        # 临时延迟计时器（按键说话结束 -> 首次TTS播放）
+        self._latency_stopwatch = Stopwatch()
+        self._awaiting_first_tts = False
 
     def _setup_audio_callbacks(self):
         """设置音频录制器回调函数"""
@@ -116,6 +122,12 @@ class VoiceChatSystem:
 
         def on_recording_stop():
             print("⏹️ 录音结束")
+            # 录音结束即开始计时
+            try:
+                self._latency_stopwatch.start()
+                self._awaiting_first_tts = True
+            except Exception:
+                pass
 
         def on_audio_processed(audio_data: np.ndarray):
             self._process_audio(audio_data)
@@ -163,11 +175,23 @@ class VoiceChatSystem:
             print("✅ 流式播放完成")
             self.is_streaming_response = False
 
+        def on_first_audio_playback():
+            # 首次播放开始，结束计时并弹窗
+            if self._awaiting_first_tts:
+                self._awaiting_first_tts = False
+                try:
+                    result = self._latency_stopwatch.stop()
+                    if result:
+                        show_time_popup(result)
+                except Exception:
+                    pass
+
         self.streaming_tts_manager.set_callbacks(
             #打印信息
             #on_text_chunk=on_text_chunk,
             #on_audio_ready=on_audio_ready,
-            on_playback_complete=on_playback_complete
+            on_playback_complete=on_playback_complete,
+            on_first_audio_playback=on_first_audio_playback
         )
 
     def _process_audio(self, audio_data: np.ndarray):
@@ -237,33 +261,48 @@ class VoiceChatSystem:
 
     def _chat_with_llm(self, user_message: str):
         """与LLM对话（支持多轮对话和流式TTS）"""
+        # 如果有中断信息，添加到用户消息中
+        if self.should_include_interrupt_context:
+            interrupted_context = self.chat_manager.get_interrupted_context()
+            if interrupted_context:
+                user_message = interrupted_context + "\n" + user_message
+            self.should_include_interrupt_context = False
+        
         # 添加用户消息到对话历史
         self.chat_manager.add_user_message(user_message)
 
-        # 调用LLM客户端
-        result = self.llm_client.chat_completion(
-            messages=self.chat_manager.get_messages(),
-            stream=True,
-            on_content=self._on_llm_content if self.streaming_tts_enabled and self.tts_enabled else None,
-            on_complete=self._on_llm_complete
-        )
+        # 在后台线程中调用LLM，避免阻塞主线程
+        def call_llm():
+            result = self.llm_client.chat_completion(
+                messages=self.chat_manager.get_messages(),
+                stream=True,
+                on_content=self._on_llm_content if self.streaming_tts_enabled and self.tts_enabled else None,
+                on_complete=self._on_llm_complete
+            )
 
-        if result["success"]:
-            # 添加助手回复到对话历史
-            self.chat_manager.add_assistant_message(result["content"])
-
-            # 显示对话轮次信息
-            if self.ui_config["show_stats"]:
-                print(f"对话轮次: {self.chat_manager.get_conversation_rounds()}")
-
-            # 如果启用了TTS但未使用流式模式，进行传统语音合成
-            if self.tts_enabled and not self.streaming_tts_enabled:
-                self._synthesize_speech(result["content"])
-        else:
-            print(f"❌ LLM对话失败: {result.get('error', '未知错误')}")
+            if result["success"]:
+                # 注意：助手回复会在_on_llm_complete中添加到历史
+                # 这里不添加，避免中断时历史被污染
+                
+                # 如果启用了TTS但未使用流式模式，进行传统语音合成
+                if self.tts_enabled and not self.streaming_tts_enabled:
+                    self._synthesize_speech(result["content"])
+            else:
+                print(f"❌ LLM对话失败: {result.get('error', '未知错误')}")
+        
+        # 启动后台线程执行LLM调用
+        import threading
+        llm_thread = threading.Thread(target=call_llm, daemon=True)
+        llm_thread.start()
+        
+        # 不等待线程完成，让主线程继续响应按键
 
     def _on_llm_content(self, content: str):
         """LLM流式内容回调"""
+        # 检查是否被中断
+        if self.streaming_tts_manager.interrupted:
+            return  # 忽略后续输出
+            
         if self.streaming_tts_enabled and self.tts_enabled:
             # 如果还没开始流式处理，启动它
             if not self.is_streaming_response:
@@ -275,10 +314,52 @@ class VoiceChatSystem:
 
     def _on_llm_complete(self, result: dict):
         """LLM完成回调"""
+        # 如果被中断，不更新对话历史
+        if self.streaming_tts_manager.interrupted:
+            print("⚠️ 对话被中断，不更新对话历史")
+            return
+            
         if result["success"] and self.streaming_tts_enabled and self.tts_enabled:
-            # 停止流式TTS处理
+            # 正常停止流式TTS处理
             self.streaming_tts_manager.stop_streaming()
+        
+        # 更新对话历史（完整回复）
+        if result["success"] and not self.streaming_tts_manager.interrupted:
+            self.chat_manager.add_assistant_message(result["content"])
+            
+            # 显示对话轮次信息
+            if self.ui_config["show_stats"]:
+                print(f"对话轮次: {self.chat_manager.get_conversation_rounds()}")
 
+    def _handle_stop_voice(self):
+        """处理停止语音播放"""
+        if not self.is_streaming_response:
+            print("⚠️ 当前没有正在播放的语音")
+            return
+
+        print("\n⏹️ 停止语音播放...")
+
+        # 1. 立即标记流式TTS为中断状态（这会立即停止播放）
+        self.streaming_tts_manager.interrupt_streaming()
+
+        # 2. 更新状态
+        self.is_streaming_response = False
+        
+        # 3. 获取中断状态并保存
+        interrupted_state = self.streaming_tts_manager.get_interrupted_state()
+
+        # 4. 保存中断的对话内容（如果有）
+        if interrupted_state["text_so_far"]:
+            self.chat_manager.save_interrupted_message(interrupted_state["text_so_far"])
+            print(f"📝 中断时的内容：{interrupted_state['text_so_far'][:50]}...")
+
+        # 5. 标记下一次对话需要包含中断信息
+        self.should_include_interrupt_context = True
+        
+        # 注意：不在这里重置中断状态，让中断标志保持
+        # 直到下次开始新的流式处理时，start_streaming()会自动重置
+        
+        print("✅ 语音播放已停止")
     def run(self):
         """运行语音对话系统（支持多轮对话）"""
         print_section("🎤 语音对话系统 - 多轮对话版本", "=", 60)
@@ -290,6 +371,7 @@ class VoiceChatSystem:
         print(f"⌨️  按 '{keys['text_input']}' 键输入文字对话")
         print(f"📜 按 '{keys['show_history']}' 键查看对话历史")
         print(f"🗑️  按 '{keys['clear_history']}' 键清空对话历史")
+        print(f"⏹️  按 '{keys['stop_voice']}' 键停止语音播放")
         print(f"🔊 按 '{keys['toggle_tts']}' 键切换TTS开关 (当前: {'开启' if self.tts_enabled else '关闭'})")
         print(f"📡 流式TTS: {'开启' if self.streaming_tts_enabled else '关闭'}")
         print(f"❌ 按 '{keys['quit']}' 键退出程序")
@@ -327,6 +409,9 @@ class VoiceChatSystem:
                         time.sleep(0.5)  # 防止重复触发
                     elif keyboard.is_pressed(keys['toggle_realtime']):
                         self._toggle_realtime_voice()
+                        time.sleep(0.5)  # 防止重复触发
+                    elif keyboard.is_pressed(keys['stop_voice']):
+                        self._handle_stop_voice()
                         time.sleep(0.5)  # 防止重复触发
                     elif keyboard.is_pressed(keys['quit']):
                         print("\n👋 退出程序")
@@ -533,6 +618,14 @@ class VoiceChatSystem:
             print(f"❌ 切换实时语音模式失败: {e}")
             # 重置状态
             self.realtime_voice_enabled = False
+
+    def _cleanup_streaming_resources(self):
+        """清理流式资源"""
+        try:
+            # 重置流式TTS管理器的中断状态
+            self.streaming_tts_manager.reset_interrupt_state()
+        except Exception as e:
+            print(f"⚠️ 清理流式资源时出错: {e}")
 
 def main():
     """主函数"""

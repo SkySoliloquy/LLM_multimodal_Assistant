@@ -74,6 +74,10 @@ class LLMClient:
             
             # 处理流式响应
             for chunk in response:
+                
+                # 检查是否有外部中断信号（如果提供了中断检查）
+                # 注意：这个需要在调用端设置一个共享的标志
+                
                 if chunk.choices and chunk.choices[0].delta.content is not None:
                     content = chunk.choices[0].delta.content
                     
@@ -86,7 +90,7 @@ class LLMClient:
                     full_content += content
                     token_count += 1
                     
-                    # 调用内容回调
+                    # 调用内容回调（回调中会检查中断标志）
                     if on_content:
                         on_content(content)
             
