@@ -8,7 +8,7 @@ LLM客户端模块
 import time
 from typing import List, Dict, Any, Optional, Callable
 from openai import OpenAI
-
+from AddWindows import NewWindowPrinter
 
 class LLMClient:
     """LLM客户端"""
@@ -36,6 +36,9 @@ class LLMClient:
             "avg_ttft": 0.0,
             "avg_generation_speed": 0.0
         }
+
+        # 创建新窗口
+        self.llm_printer = NewWindowPrinter(window_name="LLM数据窗口")
     
     def chat_completion(self, 
                        messages: List[Dict[str, str]], 
@@ -54,8 +57,11 @@ class LLMClient:
         Returns:
             包含响应和统计信息的字典
         """
-        print("\n🤖 正在生成回复...")
-        
+        # 获取用户发送的最新消息
+        self.user_message = messages[-1].get("content")
+
+        self.llm_printer.print_to_window("\n我: "+self.user_message)
+        self.llm_printer.print_to_window("\n正在生成回复...")
         # 记录开始时间
         start_time = time.time()
         first_token_time = None
@@ -69,9 +75,9 @@ class LLMClient:
                 messages=messages,
                 stream=stream
             )
-            
-            print("\n助手: ", end="", flush=True)
-            
+
+            self.llm_printer.print_to_window("\nMory: ")
+
             # 处理流式响应
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content is not None:
@@ -82,7 +88,7 @@ class LLMClient:
                         first_token_time = time.time()
                     
                     # 输出内容
-                    print(content, end="", flush=True)
+                    self.llm_printer.print_to_window(content)
                     full_content += content
                     token_count += 1
                     
@@ -146,7 +152,6 @@ class LLMClient:
     
     def _print_stats(self, ttft: float, content_length: int, generation_speed: float, total_time: float):
         """打印统计信息"""
-        print("\n")
         print("-" * 50)
         print(f"首Token时间 (TTFT): {ttft:.3f}秒" if ttft > 0 else "未检测到token")
         print(f"总字符数: {content_length}")

@@ -4,28 +4,27 @@
 流式TTS管理器
 支持实时文本流式传输和语音合成
 """
-
 import time
 import threading
 import queue
 from typing import Optional, Callable, List
 from collections import deque
 from gpt_sovits_client import GPTSoVITSClient
-
+from AddWindows import NewWindowPrinter
 
 class StreamingTTSManager:
     """流式TTS管理器"""
-    
+
     def __init__(self, 
                  tts_client: GPTSoVITSClient,
-                 chunk_size: int = 40,
-                 min_chunk_size: int = 10,
-                 max_chunk_size: int = 80,
-                 split_punctuation: str = '。！？.!?，,;；',
-                 overlap_chars: int = 3):
+                 chunk_size=None,
+                 min_chunk_size=None,
+                 max_chunk_size=None,
+                 split_punctuation=None,
+                 overlap_chars=None):
         """
         初始化流式TTS管理器
-        
+
         Args:
             tts_client: TTS客户端
             chunk_size: 每次传给TTS的字符数
@@ -39,13 +38,15 @@ class StreamingTTSManager:
         self.min_chunk_size = min_chunk_size
         self.max_chunk_size = max_chunk_size
         self.split_punctuation = split_punctuation
-        self.overlap_chars = overlap_chars
         
         # 文本缓冲
         self.text_buffer = ""
         self.processed_length = 0
         self.is_processing = False
-        
+
+        # 首句低延迟控制
+        self.first_delay = True
+
         # 音频队列和播放控制
         self.audio_queue = queue.Queue()
         self.is_playing = False
@@ -59,7 +60,10 @@ class StreamingTTSManager:
         # 线程控制
         self.processing_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
-        
+
+        #创建新窗口
+        self.sensor_printer = NewWindowPrinter(window_name="语音合成数据窗口")
+
         # 统计信息
         self.stats = {
             "total_chunks": 0,
@@ -88,7 +92,10 @@ class StreamingTTSManager:
         # 重置文本缓冲区和处理位置，确保新的响应从干净状态开始
         self.text_buffer = ""
         self.processed_length = 0
-        
+
+        # 重置首句延迟标志
+        self.first_delay = True
+
         # 启动处理线程
         self.processing_thread = threading.Thread(target=self._processing_loop, daemon=True)
         self.processing_thread.start()
@@ -143,8 +150,22 @@ class StreamingTTSManager:
 
     def _get_next_chunk(self) -> Optional[str]:
         """获取下一个文本块"""
+        # 检查已处理的文本长度是否大于或等于文本缓冲区的总长度
+        # 如果是，说明没有更多文本需要处理，返回None
         if self.processed_length >= len(self.text_buffer):
             return None
+
+
+        # 首句降低最小字符数，因为首句通常是打招呼
+        if self.first_delay:
+            self.first_delay = False
+            self.temp = [self.chunk_size,self.min_chunk_size]
+            self.chunk_size = 6
+            self.min_chunk_size = 1
+        else:
+            self.chunk_size = self.temp[0]
+            self.min_chunk_size = self.temp[1]
+
 
         # 从已处理位置开始
         start_pos = self.processed_length
@@ -162,7 +183,7 @@ class StreamingTTSManager:
         search_text = self.text_buffer[start_pos:max_end]
 
         strong_punct = '。！？.!?'
-        weak_punct = '，,;；'
+        weak_punct = '，,;；：'
 
         def find_split(text: str, prefer_len: int):
             # 先在强标点中找：优先选择 <= prefer_len 范围内的最后一个，其次选择 > prefer_len 的第一个
@@ -230,7 +251,8 @@ class StreamingTTSManager:
     def _process_chunk(self, chunk: str):
         """处理文本块"""
         try:
-            print(f"🔄 处理文本块: {chunk}")
+            #打印处理的文本块
+            #self.sensor_printer.print_to_window(f"🔄 处理文本块: {chunk}")
             
             # 更新统计信息
             self.stats["total_chunks"] += 1
@@ -257,8 +279,9 @@ class StreamingTTSManager:
     def _synthesize_chunk(self, chunk: str):
         """合成语音块"""
         try:
+            # 记录程序开始执行的时间，使用time模块的time()函数获取当前时间戳
             start_time = time.time()
-            
+
             # 生成唯一的输出文件名
             timestamp = int(time.time() * 1000)  # 使用毫秒时间戳
             output_path = f"streaming_tts_{timestamp}.wav"
@@ -276,20 +299,18 @@ class StreamingTTSManager:
                 prompt_text="谁能想到佳怡最后会到火星上去呢。",
                 top_k=10,
                 top_p=1,
-                temperature=1,
+                temperature=0.8,
                 speed_factor=1,
                 text_split_method="cut4",
                 batch_size=2,
 
                 #sample_steps=4 #采样率，适用v4
             )
-            
+
             processing_time = time.time() - start_time
-            self.stats["processing_time"] += processing_time
             
             if success:
-                print(f"✅ 语音块合成成功: {chunk} (耗时: {processing_time:.2f}秒)")
-                
+                self.sensor_printer.print_to_window(f"✅ 语音块合成成功: {chunk} (耗时: {processing_time:.2f}秒)\n")
                 # 将音频文件加入队列
                 self.audio_queue.put(output_path)
                 
@@ -301,10 +322,10 @@ class StreamingTTSManager:
                 if not self.is_playing:
                     self._start_playback()
             else:
-                print(f"❌ 语音块合成失败: {chunk[:20]}...")
+                self.sensor_printer.print_to_window(f"❌ 语音块合成失败: {chunk[:20]}...")
                 
         except Exception as e:
-            print(f"❌ 合成语音块异常: {e}")
+            self.sensor_printer.print_to_window(f"❌ 合成语音块异常: {e}")
     
     def _start_playback(self):
         """开始播放"""
@@ -381,7 +402,8 @@ class StreamingTTSManager:
         """处理剩余文本"""
         remaining = self.text_buffer[self.processed_length:]
         if remaining.strip():
-            print(f"🔄 处理剩余文本: {remaining}")
+            #print(f"🔄 处理剩余文本: {remaining}")
+            self.sensor_printer.print_to_window(f"🔄 处理剩余文本: {remaining}\n")
             self._process_chunk(remaining)
     
     def get_stats(self) -> dict:

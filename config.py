@@ -61,11 +61,10 @@ class Config:
     
     # 流式TTS配置
     STREAMING_TTS_ENABLED = True  # 是否启用流式TTS
-    STREAMING_TTS_CHUNK_SIZE = 30  # 每次传给TTS的字符数
-    STREAMING_TTS_MIN_CHUNK_SIZE = 10  # 最小字符数
-    STREAMING_TTS_MAX_CHUNK_SIZE = 50  # 最大字符数
+    STREAMING_TTS_CHUNK_SIZE = 40  # 每次传给TTS的字符数
+    STREAMING_TTS_MIN_CHUNK_SIZE = 30  # 最小字符数
+    STREAMING_TTS_MAX_CHUNK_SIZE = 80  # 最大字符数
     STREAMING_TTS_SPLIT_PUNCTUATION = '。！？.!?，,;；'  # 切分标点符号
-    STREAMING_TTS_OVERLAP_CHARS = 3  # 语音片段重叠字符数
     
     # 按键配置
     KEY_RECORD = 'num 5'
@@ -151,7 +150,6 @@ class Config:
             "min_chunk_size": cls.STREAMING_TTS_MIN_CHUNK_SIZE,
             "max_chunk_size": cls.STREAMING_TTS_MAX_CHUNK_SIZE,
             "split_punctuation": cls.STREAMING_TTS_SPLIT_PUNCTUATION,
-            "overlap_chars": cls.STREAMING_TTS_OVERLAP_CHARS
 
         }
     

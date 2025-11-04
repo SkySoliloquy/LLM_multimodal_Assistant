@@ -90,8 +90,6 @@ class GPTSoVITSClient:
         
         try:
             print(f"🎙️ 正在合成语音...")
-            print(f"   文本: {text[:50]}..." if len(text) > 50 else f"   文本: {text}")
-            print(f"   参考音频: {ref_audio_path}")
             
             # 发送POST请求
             response = requests.post(

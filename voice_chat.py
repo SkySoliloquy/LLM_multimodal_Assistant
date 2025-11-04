@@ -4,7 +4,7 @@
 语音对话系统 - 结合ASR和LLM，支持多轮对话
 按z键录音，语音转文字后发送给模型
 """
-
+import multiprocessing
 import time
 import keyboard
 import numpy as np
@@ -83,6 +83,7 @@ class VoiceChatSystem:
         )
 
         # 初始化流式TTS管理器
+
         streaming_config = Config.get_streaming_tts_config()
         self.streaming_tts_enabled = streaming_config["enabled"]
         self.streaming_tts_manager = StreamingTTSManager(
@@ -91,7 +92,6 @@ class VoiceChatSystem:
             min_chunk_size=streaming_config["min_chunk_size"],
             max_chunk_size=streaming_config["max_chunk_size"],
             split_punctuation=streaming_config["split_punctuation"],
-            overlap_chars=streaming_config["overlap_chars"]
         )
 
         # 设置实时语音回调
@@ -109,10 +109,11 @@ class VoiceChatSystem:
         # 流式TTS状态
         self.is_streaming_response = False
 
+
     def _setup_audio_callbacks(self):
         """设置音频录制器回调函数"""
         def on_recording_start():
-            print("🎤 开始录音... (松开z键停止)")
+            print("🎤 开始录音... (点击num4键停止)")
 
         def on_recording_stop():
             print("⏹️ 录音结束")
@@ -256,9 +257,6 @@ class VoiceChatSystem:
             if self.ui_config["show_stats"]:
                 print(f"对话轮次: {self.chat_manager.get_conversation_rounds()}")
 
-            # 如果启用了TTS但未使用流式模式，进行传统语音合成
-            if self.tts_enabled and not self.streaming_tts_enabled:
-                self._synthesize_speech(result["content"])
         else:
             print(f"❌ LLM对话失败: {result.get('error', '未知错误')}")
 
@@ -296,8 +294,6 @@ class VoiceChatSystem:
         print_section("", "=", 60)
         print()
 
-        # 注意：实时语音不会在启动时自动开启，需要用户手动按r键开启
-        print("💡 提示：按 'r' 键可开启实时语音模式")
 
         import tool_numpad as numpad
 
@@ -313,6 +309,7 @@ class VoiceChatSystem:
                     elif not keyboard.is_pressed(keys['record']) and self.audio_recorder.is_recording_active():
                         self.audio_recorder.stop_recording()
                     elif keyboard.is_pressed(keys['text_input']):
+                        time.sleep(0.5)  # 防止文字串键
                         self._handle_text_input()
                         time.sleep(0.5)  # 防止重复触发
                     elif keyboard.is_pressed(keys['show_history']):
@@ -372,46 +369,7 @@ class VoiceChatSystem:
         print(f"\n📝 用户输入: {user_input}")
         self._chat_with_llm(user_input)
 
-    def _synthesize_speech(self, text: str):
-        """合成语音"""
-        if not self.tts_enabled:
-            return
 
-        try:
-            print("\n🎙️ 正在合成语音...")
-            tts_start_time = time.time()
-
-            # 生成唯一的输出文件名，避免文件冲突
-            timestamp = int(time.time())
-            output_path = f"tts_output_{timestamp}.wav"
-
-
-            # 调用TTS客户端（带重试机制）
-            success = self._tts_with_retry(
-                text=text,
-                output_path=output_path,
-                max_retries=self.tts_config["retry_count"]
-            )
-
-            tts_end_time = time.time()
-            tts_duration = tts_end_time - tts_start_time
-
-            if success:
-                print(f"✅ 语音合成成功! 耗时: {format_duration(tts_duration)}")
-
-                # 如果启用自动播放，播放合成的语音
-                if self.tts_auto_play:
-                    self._play_audio(output_path)
-            else:
-                print(f"❌ 语音合成失败")
-                # 清理可能创建的文件
-                self._cleanup_file(output_path)
-
-        except Exception as e:
-            print(f"❌ TTS合成异常: {e}")
-            # 清理可能创建的文件
-            if 'output_path' in locals():
-                self._cleanup_file(output_path)
 
     def _play_audio(self, audio_path: str):
         """播放音频文件"""
@@ -553,4 +511,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.set_start_method('spawn')
     main()
