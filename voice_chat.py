@@ -9,7 +9,6 @@ import time
 import keyboard
 import numpy as np
 from typing import Optional
-
 # 导入自定义模块
 from config import Config
 from chat_manager import ChatManager
@@ -20,7 +19,10 @@ from gpt_sovits_client import GPTSoVITSClient
 from realtime_voice_recorder import RealtimeVoiceRecorder
 from streaming_tts_manager import StreamingTTSManager
 from common_utils import print_section, format_duration, print_file_info
-
+# 导入记忆模块
+import os
+from memu import MemuClient
+from memory import Memory
 
 class VoiceChatSystem:
     """语音对话系统"""
@@ -50,9 +52,25 @@ class VoiceChatSystem:
             model_name=llm_config["model_name"]
         )
 
+        #初始化Menu记忆框架
+        memory_config = Config.get_memory_config()
+
+        self.memory_client = MemuClient(
+            base_url=memory_config["base_url"],
+            api_key=memory_config["api_key"],
+        )
+        user_id = memory_config["user_id"]
+        user_name = memory_config["user_name"]
+        agent_id = memory_config["agent_id"]
+        agent_name = memory_config["agent_name"]
+
+        self.memory = Memory(self.memory_client,user_id,user_name,agent_id,agent_name)
+        memory_prompt = self.memory.menu_prompt()   # 获取存储的记忆'''
+
         # 初始化对话管理器
         chat_config = Config.get_chat_config()
-        system_prompt = Config.load_system_prompt()
+        #将记忆缓存到系统提示词中
+        system_prompt = Config.load_system_prompt() +"\n"+memory_prompt
         self.chat_manager = ChatManager(system_prompt, max_history=chat_config["max_history"])
 
         # 初始化音频录制器
@@ -83,7 +101,6 @@ class VoiceChatSystem:
         )
 
         # 初始化流式TTS管理器
-
         streaming_config = Config.get_streaming_tts_config()
         self.streaming_tts_enabled = streaming_config["enabled"]
         self.streaming_tts_manager = StreamingTTSManager(
@@ -238,6 +255,9 @@ class VoiceChatSystem:
 
     def _chat_with_llm(self, user_message: str):
         """与LLM对话（支持多轮对话和流式TTS）"""
+        # 添加时间戳到消息中
+        user_message = f"{time.strftime('%Y-%m-%d %H:%M:%S')} \n{user_message}"
+
         # 添加用户消息到对话历史
         self.chat_manager.add_user_message(user_message)
 
@@ -257,8 +277,21 @@ class VoiceChatSystem:
             if self.ui_config["show_stats"]:
                 print(f"对话轮次: {self.chat_manager.get_conversation_rounds()}")
 
+            # 缓存对话用于记忆保存
+            self.memory.conversation_buffer.extend([
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": result["content"]}
+            ])
+
+            # 每4轮对话保存一次记忆
+            if len(self.memory.conversation_buffer) >= 8:
+                self.memory._save_conversation_memory()
+                self.memory.conversation_buffer = []
+                print("已保存记忆")
+
         else:
             print(f"❌ LLM对话失败: {result.get('error', '未知错误')}")
+
 
     def _on_llm_content(self, content: str):
         """LLM流式内容回调"""
@@ -301,7 +334,8 @@ class VoiceChatSystem:
             while True:
                 #获取按键扫描码进行小键盘约束，小键盘编码一般在70+
                 scan_code=numpad.get_scan_code_hook()
-                if scan_code is not None and scan_code>70:
+                event_name=numpad.get_event_name_hook()
+                if scan_code is not None and scan_code>70 and numpad.is_digit_key(event_name):
 
                     # 检测按键
                     if keyboard.is_pressed(keys['record']) and not self.audio_recorder.is_recording_active():
@@ -309,7 +343,7 @@ class VoiceChatSystem:
                     elif not keyboard.is_pressed(keys['record']) and self.audio_recorder.is_recording_active():
                         self.audio_recorder.stop_recording()
                     elif keyboard.is_pressed(keys['text_input']):
-                        time.sleep(0.5)  # 防止文字串键
+                        time.sleep(1)  # 防止文字串键
                         self._handle_text_input()
                         time.sleep(0.5)  # 防止重复触发
                     elif keyboard.is_pressed(keys['show_history']):
@@ -325,6 +359,9 @@ class VoiceChatSystem:
                     elif keyboard.is_pressed(keys['toggle_realtime']):
                         self._toggle_realtime_voice()
                         time.sleep(0.5)  # 防止重复触发
+                    elif keyboard.is_pressed(keys['memory_save']):
+                        self._memory_save()
+                        time.sleep(1.5)  # 防止重复触发
                     elif keyboard.is_pressed(keys['quit']):
                         print("\n👋 退出程序")
                         break
@@ -369,6 +406,12 @@ class VoiceChatSystem:
         print(f"\n📝 用户输入: {user_input}")
         self._chat_with_llm(user_input)
 
+
+    def _memory_save(self):
+        """手动保存记忆"""
+        self.memory._save_conversation_memory()
+        self.memory.conversation_buffer = []
+        print("已手动保存记忆")
 
 
     def _play_audio(self, audio_path: str):

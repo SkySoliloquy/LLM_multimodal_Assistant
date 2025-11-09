@@ -1,4 +1,4 @@
 @echo off
-call .venv1\Scripts\activate
+call conda activate mory_env
 python voice_chat.py
 pause

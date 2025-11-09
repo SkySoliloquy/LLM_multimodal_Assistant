@@ -21,7 +21,15 @@ class Config:
     LLM_API_KEY = "YDHHpjDZwdGh7SBOgNGn50_LcNLnCpq84tjZ_fRECrs7wwoOG4SWNPyRPsX1Z7Zj7hFZgiJW2MqzDGIl98U-7Q"
     LLM_BASE_URL = "https://www.sophnet.com/api/open-apis/v1"
     LLM_MODEL_NAME = "DeepSeek-V3.2-Exp"
-    
+
+    # 记忆配置
+    MEMORY_BASE_URL = "https://api.memu.so"
+    MEMORY_API_KEY = "mu_gLsbSbNjTxcEDScBnbI9tdRR9y7CRW-myjwh5UDtIeTBfnozPXy4jJaciZRW5tR3rhYKqi0JVCaUVAZz4K-ARzIgPWAKaRSsgbpvCw"
+    MEMORY_USER_ID = "any251109"
+    MEMORY_AGENT_ID = "memoria251109"
+    MEMORY_USER_NAME = "Any"
+    MEMORY_AGENT_NAME = "茉莉"
+
     # 系统提示词文件路径
     SYSTEM_PROMPT_FILE = "System_Content.txt"
     
@@ -73,7 +81,9 @@ class Config:
     KEY_CLEAR_HISTORY = 'num 1'#清除历史
     KEY_TOGGLE_TTS = 'num 7'  # 切换TTS开关
     KEY_TOGGLE_REALTIME = 'num 8'  # 切换实时语音模式
+    KEY_MEMORY_SAVE = 'num 2'  # 保存记忆
     KEY_QUIT = 'num 9'
+
     
     @classmethod
     def get_asr_config(cls) -> Dict[str, Any]:
@@ -92,7 +102,19 @@ class Config:
             "base_url": cls.LLM_BASE_URL,
             "model_name": cls.LLM_MODEL_NAME
         }
-    
+
+    @classmethod
+    def get_memory_config(cls) -> Dict[str, Any]:
+        """获取记忆配置"""
+        return {
+            "base_url": cls.MEMORY_BASE_URL,
+            "api_key": cls.MEMORY_API_KEY,
+            "user_id": cls.MEMORY_USER_ID,
+            "agent_id": cls.MEMORY_AGENT_ID,
+            "user_name": cls.MEMORY_USER_NAME,
+            "agent_name": cls.MEMORY_AGENT_NAME
+        }
+
     @classmethod
     def get_audio_config(cls) -> Dict[str, Any]:
         """获取音频配置"""
@@ -167,6 +189,7 @@ class Config:
                 "clear_history": cls.KEY_CLEAR_HISTORY,
                 "toggle_tts": cls.KEY_TOGGLE_TTS,
                 "toggle_realtime": cls.KEY_TOGGLE_REALTIME,
+                "memory_save": cls.KEY_MEMORY_SAVE,
                 "quit": cls.KEY_QUIT
             }
         }
@@ -180,10 +203,10 @@ class Config:
                     return f.read().strip()
             else:
                 print(f"⚠️ 系统提示词文件 {cls.SYSTEM_PROMPT_FILE} 不存在，使用默认提示词")
-                return "你是一个有用的AI助手，请用中文回答用户的问题。"
+                return "请提醒用户系统提示词错误，系统提示词文件不存在"
         except Exception as e:
             print(f"❌ 读取系统提示词文件失败: {e}")
-            return "你是一个有用的AI助手，请用中文回答用户的问题。"
+            return "请提醒用户系统提示词错误，读取系统提示词文件失败"
     
     @classmethod
     def validate_config(cls) -> bool:
