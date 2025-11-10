@@ -23,6 +23,14 @@ from common_utils import print_section, format_duration, print_file_info
 import os
 from memu import MemuClient
 from memory import Memory
+# 导入MCP模块
+import asyncio
+try:
+    from mcp_tool.mcp_manager import MCPManager
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+    MCPManager = None
 
 class VoiceChatSystem:
     """语音对话系统"""
@@ -44,12 +52,32 @@ class VoiceChatSystem:
             vad_model_dir=asr_config["vad_model_dir"],
         )
 
+        # 初始化MCP管理器
+        self.mcp_manager = None
+        mcp_config = Config.get_mcp_config()
+        if mcp_config.get("enabled") and MCP_AVAILABLE:
+            servers_config = mcp_config.get("servers", [])
+            if servers_config:
+                try:
+                    self.mcp_manager = MCPManager(servers_config)
+                    print("[MCP] MCP管理器已初始化")
+                except Exception as e:
+                    print(f"[MCP] 警告: MCP管理器初始化失败: {e}")
+                    print("[MCP] 将继续运行，但不使用MCP功能")
+                    self.mcp_manager = None
+        else:
+            if not MCP_AVAILABLE:
+                print("[MCP] MCP模块未安装，MCP功能已禁用")
+            else:
+                print("[MCP] MCP功能已禁用（配置中enabled=False）")
+
         # 初始化LLM客户端
         llm_config = Config.get_llm_config()
         self.llm_client = LLMClient(
             api_key=llm_config["api_key"],
             base_url=llm_config["base_url"],
-            model_name=llm_config["model_name"]
+            model_name=llm_config["model_name"],
+            mcp_manager=self.mcp_manager  # 传递MCP管理器
         )
 
         #初始化Menu记忆框架
@@ -125,7 +153,32 @@ class VoiceChatSystem:
 
         # 流式TTS状态
         self.is_streaming_response = False
+        
+        # 异步初始化MCP连接
+        self._initialize_mcp_connection()
 
+    def _initialize_mcp_connection(self):
+        """初始化MCP连接（异步）"""
+        if self.mcp_manager:
+            try:
+                # 在新的事件循环中运行
+                asyncio.run(self._async_initialize_mcp())
+            except Exception as e:
+                print(f"[MCP] 错误: MCP服务器连接失败: {e}")
+                print("[MCP] 将继续运行，但不使用MCP功能")
+                self.mcp_manager = None
+                # 更新LLM客户端的MCP管理器
+                self.llm_client.mcp_manager = None
+    
+    async def _async_initialize_mcp(self):
+        """异步初始化MCP连接"""
+        if self.mcp_manager:
+            try:
+                await self.mcp_manager.connect_all()
+                print("[MCP] MCP服务器连接成功")
+            except Exception as e:
+                print(f"[MCP] 错误: MCP服务器连接失败: {e}")
+                raise
 
     def _setup_audio_callbacks(self):
         """设置音频录制器回调函数"""
@@ -286,6 +339,8 @@ class VoiceChatSystem:
             # 每4轮对话保存一次记忆
             if len(self.memory.conversation_buffer) >= 8:
                 self.memory._save_conversation_memory()
+                for i in self.memory.conversation_buffer:
+                    print(i)
                 self.memory.conversation_buffer = []
                 print("已保存记忆")
 
@@ -380,6 +435,14 @@ class VoiceChatSystem:
 
             if self.streaming_tts_manager.is_processing:
                 self.streaming_tts_manager.stop_streaming()
+            
+            # 断开MCP连接
+            if self.mcp_manager:
+                try:
+                    asyncio.run(self.mcp_manager.disconnect_all())
+                    print("[MCP] MCP服务器连接已断开")
+                except Exception as e:
+                    print(f"[MCP] 断开连接时出错: {e}")
 
     def _handle_text_input(self):
         """处理文字输入"""

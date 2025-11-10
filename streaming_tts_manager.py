@@ -288,9 +288,8 @@ class StreamingTTSManager:
             
             # 调用TTS合成
             success = self.tts_client.text_to_speech(
-                text=chunk,
-                #ref_audio_path=r"D:\Project\SenseVoice-main\U_Offical.mp3",  # 使用固定的参考音频路径
-                ref_audio_path="D:\Project\SenseVoice-main\谁能想到佳怡最后会到火星上去呢？.wav",
+                text=chunk,                              # 使用固定的参考音频路径
+                ref_audio_path=r"D:\Project\SenseVoice-main\resource\谁能想到佳怡最后会到火星上去呢？.wav",
                 output_path=output_path,
                 text_lang="zh",
                 prompt_lang="zh",

@@ -34,7 +34,7 @@ class Config:
     SYSTEM_PROMPT_FILE = "System_Content.txt"
     
     # 对话管理配置
-    MAX_HISTORY_ROUNDS = 20  # 最大保留的对话轮数
+    MAX_HISTORY_ROUNDS = 50  # 最大保留的对话轮数
     
     # 音频录制配置
     AUDIO_CHUNK = 1024
@@ -50,7 +50,7 @@ class Config:
     
     # GPT-SoVITS TTS配置
     TTS_API_URL = "http://127.0.0.1:9880"
-    TTS_REF_AUDIO_PATH = r"D:\Project\SenseVoice-main\U_Offical.mp3"
+    TTS_REF_AUDIO_PATH = r"/resource/U_Offical.mp3"
     TTS_OUTPUT_PATH = "output.wav"
     TTS_TEXT_LANG = "zh"
     TTS_PROMPT_LANG = "zh"
@@ -83,6 +83,24 @@ class Config:
     KEY_TOGGLE_REALTIME = 'num 8'  # 切换实时语音模式
     KEY_MEMORY_SAVE = 'num 2'  # 保存记忆
     KEY_QUIT = 'num 9'
+    
+    # MCP配置
+    MCP_ENABLED = True  # 是否启用MCP功能
+    MCP_SERVERS = [
+        {
+            "name": "bing-search",
+            "type": "http",
+            "url": "https://mcp.api-inference.modelscope.net/bd586c64cbff4c/mcp",
+            "headers": {}
+        },
+        {
+            "name": "local-calculator",
+            "type": "stdio",
+            "command": "python",
+            "args": ["mcp_tool/local_calculator_server.py"]
+        }
+        # 可以添加更多服务器
+    ]
 
     
     @classmethod
@@ -192,6 +210,14 @@ class Config:
                 "memory_save": cls.KEY_MEMORY_SAVE,
                 "quit": cls.KEY_QUIT
             }
+        }
+    
+    @classmethod
+    def get_mcp_config(cls) -> Dict[str, Any]:
+        """获取MCP配置"""
+        return {
+            "enabled": cls.MCP_ENABLED,
+            "servers": cls.MCP_SERVERS
         }
     
     @classmethod

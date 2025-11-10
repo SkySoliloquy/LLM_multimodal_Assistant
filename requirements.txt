@@ -13,3 +13,4 @@ pyaudio
 requests
 pygame
 scipy
+mcp[cli]
