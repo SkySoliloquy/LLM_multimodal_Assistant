@@ -288,22 +288,19 @@ class StreamingTTSManager:
             
             # 调用TTS合成
             success = self.tts_client.text_to_speech(
-                text=chunk,                              # 使用固定的参考音频路径
-                ref_audio_path=r"D:\Project\SenseVoice-main\resource\谁能想到佳怡最后会到火星上去呢？.wav",
+                text=chunk,
+                ref_audio_path=r"D:\Project\SenseVoice-main\resource\【中立_neutral】这个嘛，你或许起初只知道一点儿，然后不停的问呀问，最后就都搞清楚了。.wav",
                 output_path=output_path,
                 text_lang="zh",
                 prompt_lang="zh",
-                #prompt_text="新年特别直播，用味觉巡游这片大地。",
-                #prompt_text="伊利奥斯的古代废墟是受国际保护的历史遗址。",
-                prompt_text="谁能想到佳怡最后会到火星上去呢。",
-                top_k=10,
+                prompt_text="这个嘛，你或许起初只知道一点儿，然后不停的问呀问，最后就都搞清楚了。",
+                top_k=5,
                 top_p=1,
-                temperature=0.8,
-                speed_factor=1,
+                temperature=1,
+                speed_factor=0.95,
                 text_split_method="cut4",
-                batch_size=2,
+                batch_size=4,
 
-                #sample_steps=4 #采样率，适用v4
             )
 
             processing_time = time.time() - start_time
