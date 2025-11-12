@@ -79,6 +79,7 @@ class Config:
     KEY_TEXT_INPUT = 'num 4'
     KEY_SHOW_HISTORY = 'num 0'#查看历史
     KEY_CLEAR_HISTORY = 'num 1'#清除历史
+    KEY_STOP_VOICE = 'num 2'#停止语音
     KEY_TOGGLE_TTS = 'num 7'  # 切换TTS开关
     KEY_TOGGLE_REALTIME = 'num 8'  # 切换实时语音模式
     KEY_MEMORY_SAVE = 'num 2'  # 保存记忆
@@ -205,6 +206,7 @@ class Config:
                 "text_input": cls.KEY_TEXT_INPUT,
                 "show_history": cls.KEY_SHOW_HISTORY,
                 "clear_history": cls.KEY_CLEAR_HISTORY,
+                "stop_voice": cls.KEY_STOP_VOICE,
                 "toggle_tts": cls.KEY_TOGGLE_TTS,
                 "toggle_realtime": cls.KEY_TOGGLE_REALTIME,
                 "memory_save": cls.KEY_MEMORY_SAVE,

@@ -22,7 +22,8 @@ class ChatManager:
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.history: List[Dict[str, str]] = []
-    
+        self.interrupted_conversation = None  # 保存未完成的对话
+
     def add_user_message(self, content: str) -> None:
         """添加用户消息到历史"""
         self.history.append({"role": "user", "content": content})
@@ -78,4 +79,19 @@ class ChatManager:
         for msg in reversed(self.history):
             if msg["role"] == "assistant":
                 return msg["content"]
+        return ""
+
+
+    def save_interrupted_message(self, partial_content: str):
+        """保存中断的对话"""
+        self.interrupted_conversation = {
+            "role": "assistant",
+            "content": partial_content + " [用户中断]",
+            "is_partial": True
+        }
+
+    def get_interrupted_context(self) -> str:
+        """获取中断上下文信息"""
+        if self.interrupted_conversation:
+            return f"\n注意：上一条消息被中断：{self.interrupted_conversation['content']}"
         return ""
