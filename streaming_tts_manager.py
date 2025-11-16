@@ -130,6 +130,18 @@ class StreamingTTSManager:
         self.stats["total_characters"] += len(text)
         
         #print(f"📝 添加文本: {text[:30]}... (总长度: {len(self.text_buffer)})\n")
+    
+    def flush_buffer(self):
+        """强制处理缓冲区中的所有剩余文本（即使不满足最小块大小）"""
+        if not self.is_processing:
+            return
+        
+        # 获取所有未处理的文本
+        remaining = self.text_buffer[self.processed_length:]
+        if remaining.strip():
+            print(f"[TTS] 强制处理剩余文本: {remaining[:50]}... (长度: {len(remaining)})")
+            # 直接处理剩余文本，不使用切分逻辑
+            self._process_chunk_direct(remaining.strip())
 
     def _processing_loop(self):
         """处理循环"""
@@ -254,9 +266,62 @@ class StreamingTTSManager:
             #打印处理的文本块
             #self.sensor_printer.print_to_window(f"🔄 处理文本块: {chunk}")
             
+            # 计算实际需要处理的文本长度（考虑原始文本缓冲区中的实际位置）
+            # 找到chunk在text_buffer中的实际位置，避免重复处理
+            start_pos = self.processed_length
+            remaining_text = self.text_buffer[start_pos:]
+            
+            # 确保chunk是remaining_text的开头部分，避免重复处理
+            if remaining_text.startswith(chunk):
+                actual_chunk = chunk
+                actual_length = len(chunk)
+            elif chunk in remaining_text:
+                # 如果chunk在remaining_text中但不是开头，可能是strip导致的问题
+                chunk_index = remaining_text.find(chunk)
+                if chunk_index == 0:
+                    actual_chunk = chunk
+                    actual_length = len(chunk)
+                else:
+                    # 如果chunk不在开头，使用从processed_length到chunk结束的实际文本
+                    actual_chunk = remaining_text[:chunk_index + len(chunk)]
+                    actual_length = len(actual_chunk)
+            else:
+                # 如果找不到chunk，使用remaining_text的开头部分（长度等于chunk）
+                actual_chunk = remaining_text[:len(chunk)] if len(remaining_text) >= len(chunk) else remaining_text
+                actual_length = len(actual_chunk)
+            
             # 更新统计信息
             self.stats["total_chunks"] += 1
             self.stats["average_chunk_size"] = self.stats["total_characters"] / self.stats["total_chunks"]
+            
+            # 调用文本块回调（使用实际处理的chunk）
+            if self.on_text_chunk:
+                self.on_text_chunk(actual_chunk)
+            
+            # 异步处理TTS
+            tts_thread = threading.Thread(
+                target=self._synthesize_chunk,
+                args=(actual_chunk,),
+                daemon=True
+            )
+            tts_thread.start()
+            
+            # 更新处理位置（使用实际处理的长度）
+            self.processed_length += actual_length
+            
+        except Exception as e:
+            print(f"❌ 处理文本块失败: {e}")
+    
+    def _process_chunk_direct(self, chunk: str):
+        """直接处理文本块（不检查边界，用于强制刷新缓冲区）"""
+        try:
+            if not chunk.strip():
+                return
+            
+            # 更新统计信息
+            self.stats["total_chunks"] += 1
+            if self.stats["total_chunks"] > 0:
+                self.stats["average_chunk_size"] = self.stats["total_characters"] / self.stats["total_chunks"]
             
             # 调用文本块回调
             if self.on_text_chunk:
@@ -270,11 +335,22 @@ class StreamingTTSManager:
             )
             tts_thread.start()
             
-            # 更新处理位置（不减去重叠字符）
-            self.processed_length += len(chunk)
+            # 更新处理位置
+            # 找到chunk在text_buffer中的实际位置
+            remaining_text = self.text_buffer[self.processed_length:]
+            if remaining_text.startswith(chunk):
+                self.processed_length += len(chunk)
+            else:
+                # 如果找不到精确匹配，更新到chunk在remaining_text中的位置
+                chunk_index = remaining_text.find(chunk)
+                if chunk_index >= 0:
+                    self.processed_length += chunk_index + len(chunk)
+                else:
+                    # 如果完全找不到，直接加上chunk的长度（可能是新添加的）
+                    self.processed_length += len(chunk)
             
         except Exception as e:
-            print(f"❌ 处理文本块失败: {e}")
+            print(f"❌ 直接处理文本块失败: {e}")
     
     def _synthesize_chunk(self, chunk: str):
         """合成语音块"""
@@ -400,7 +476,8 @@ class StreamingTTSManager:
         if remaining.strip():
             #print(f"🔄 处理剩余文本: {remaining}")
             self.sensor_printer.print_to_window(f"🔄 处理剩余文本: {remaining}\n")
-            self._process_chunk(remaining)
+            # 使用直接处理方法，避免边界检查导致的重复
+            self._process_chunk_direct(remaining.strip())
     
     def get_stats(self) -> dict:
         """获取统计信息"""

@@ -319,7 +319,8 @@ class VoiceChatSystem:
             messages=self.chat_manager.get_messages(),
             stream=True,
             on_content=self._on_llm_content if self.streaming_tts_enabled and self.tts_enabled else None,
-            on_complete=self._on_llm_complete
+            on_complete=self._on_llm_complete,
+            on_tool_call_detected=self._flush_tts_buffer if self.streaming_tts_enabled and self.tts_enabled else None
         )
 
         if result["success"]:
@@ -358,6 +359,11 @@ class VoiceChatSystem:
 
             # 将内容添加到流式TTS管理器
             self.streaming_tts_manager.add_text(content)
+    
+    def _flush_tts_buffer(self):
+        """强制处理TTS缓冲区中的剩余文本"""
+        if self.streaming_tts_enabled and self.tts_enabled and self.streaming_tts_manager:
+            self.streaming_tts_manager.flush_buffer()
 
     def _on_llm_complete(self, result: dict):
         """LLM完成回调"""

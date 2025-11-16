@@ -90,7 +90,7 @@ class Config:
         {
             "name": "bing-search",
             "type": "http",
-            "url": "https://mcp.api-inference.modelscope.net/bd586c64cbff4c/mcp",
+            "url": "https://mcp.api-inference.modelscope.net/42ef267912fb46/mcp",
             "headers": {}
         },
         {
