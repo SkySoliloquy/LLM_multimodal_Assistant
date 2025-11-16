@@ -7,6 +7,8 @@ MCP客户端模块，提供统一的接口连接和管理MCP服务器。
 
 import asyncio
 import json
+import os
+import sys
 from contextlib import AsyncExitStack
 from typing import Optional, Dict, Any, List
 from abc import ABC, abstractmethod
@@ -328,10 +330,30 @@ class MCPClient:
             if not args:
                 raise ValueError(f"MCP服务器 {self.name} 缺少args配置")
             
-            server_params = StdioServerParameters(
-                command=command,
-                args=args
-            )
+            # 准备环境变量
+            env = os.environ.copy()
+            if "env" in self.config:
+                env.update(self.config["env"])
+            # 确保 UTF-8 环境变量
+            if sys.platform == "win32":
+                env["PYTHONIOENCODING"] = "utf-8"
+                env["PYTHONUTF8"] = "1"
+            
+            # 创建服务器参数，如果支持 env 参数则传递
+            try:
+                # 尝试使用 env 参数（如果 StdioServerParameters 支持）
+                server_params = StdioServerParameters(
+                    command=command,
+                    args=args,
+                    env=env
+                )
+            except TypeError:
+                # 如果不支持 env 参数，使用默认方式
+                # 注意：环境变量应该已经通过 os.environ 设置
+                server_params = StdioServerParameters(
+                    command=command,
+                    args=args
+                )
             
             # 创建 stdio 客户端上下文
             self._stdio_ctx = stdio_client(server_params)

@@ -156,6 +156,7 @@ class LLMClient:
                 messages.append(tool_message)
                 
                 print(f"[MCP] 工具 {tool_name} 执行成功，结果已添加到消息历史")
+                print(f"[MCP] 工具 {tool_name} 处理完成，准备处理下一个工具...")
                 
             except Exception as e:
                 import traceback
@@ -169,6 +170,8 @@ class LLMClient:
                     "content": f"工具执行失败: {str(e)}"
                 }
                 messages.append(tool_message)
+        
+        print(f"[MCP] 所有工具调用处理完成，共处理 {len(tool_calls)} 个工具")
     
     def _detect_tool_call_trigger(self, content: str, delta, chunk) -> bool:
         """
@@ -358,10 +361,13 @@ class LLMClient:
                 traceback.print_exc()
             
             # 如果检测到工具调用，工具调用前的内容已经通过on_content流式传递给TTS了
-            # 通过回调通知强制刷新TTS缓冲区，确保工具调用前的内容被立即处理
-            if tool_call_detected and tts_content_before_tool:
-                print(f"[MCP] 工具调用前的内容已流式传递给TTS: {len(tts_content_before_tool)} 字符，触发强制刷新")
-                # 触发工具调用检测回调，用于强制刷新TTS缓冲区
+            # 通过回调通知强制刷新TTS缓冲区，确保工具调用前的内容被立即处理，并播放工具调用音效
+            if tool_call_detected:
+                if tts_content_before_tool:
+                    print(f"[MCP] 工具调用前的内容已流式传递给TTS: {len(tts_content_before_tool)} 字符，触发强制刷新")
+                else:
+                    print(f"[MCP] 直接进入MCP循环（无提醒语音）")
+                # 触发工具调用检测回调，用于强制刷新TTS缓冲区和播放音效
                 if on_tool_call_detected:
                     try:
                         on_tool_call_detected()
@@ -456,11 +462,15 @@ class LLMClient:
                 # 处理工具调用（异步）
                 if self.mcp_manager:
                     try:
+                        print(f"[MCP] 开始处理工具调用（异步）...")
                         self._run_async(self._handle_tool_calls(tool_calls, messages_copy))
+                        print(f"[MCP] 工具调用处理完成")
                     except Exception as e:
                         print(f"[MCP] 处理工具调用失败: {e}")
                         import traceback
                         traceback.print_exc()
+                else:
+                    print(f"[MCP] 警告: MCP管理器不可用，跳过工具调用")
                 
                 # 如果已经达到最大迭代次数，强制返回回复
                 if tool_call_iteration >= max_tool_call_iterations:
@@ -527,13 +537,24 @@ class LLMClient:
                     break
                 
                 # 进行下一次LLM调用（检查是否还需要工具调用）
-                next_response = self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=messages_copy,
-                    tools=tools,  # 仍然传递tools，让LLM决定是否继续使用
-                    tool_choice="auto",
-                    stream=True  # 使用流式检测
-                )
+                print(f"[MCP] 工具调用完成，准备进行下一次LLM调用来检查是否还需要工具调用...")
+                try:
+                    next_response = self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=messages_copy,
+                        tools=tools,  # 仍然传递tools，让LLM决定是否继续使用
+                        tool_choice="auto",
+                        stream=True,  # 使用流式检测
+                        timeout=60.0  # 设置超时时间
+                    )
+                    print(f"[MCP] 下一次LLM调用已发起，开始处理流式响应...")
+                except Exception as e:
+                    print(f"[MCP] 下一次LLM调用失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # 如果调用失败，尝试获取最终回复
+                    tool_call_detected = False
+                    break
                 
                 # 处理流式响应，检测是否还有工具调用
                 tool_call_detected_next = False
@@ -541,40 +562,67 @@ class LLMClient:
                 temp_content_for_check = ""
                 last_chunk_next = None
                 
-                for chunk in next_response:
-                    if not hasattr(chunk, 'choices') or not chunk.choices:
-                        continue
-                    
-                    last_chunk_next = chunk
-                    delta = getattr(chunk.choices[0], 'delta', None)
-                    if delta is None:
-                        # 检查finish_reason
-                        finish_reason = getattr(chunk.choices[0], 'finish_reason', None)
-                        if finish_reason == 'tool_calls':
+                print(f"[MCP] 开始处理下一次LLM调用的流式响应...")
+                chunk_count = 0
+                try:
+                    for chunk in next_response:
+                        chunk_count += 1
+                        if chunk_count == 1:
+                            print(f"[MCP] 收到第一个响应chunk")
+                        if chunk_count % 10 == 0:
+                            print(f"[MCP] 已处理 {chunk_count} 个chunk")
+                        
+                        if not hasattr(chunk, 'choices') or not chunk.choices:
+                            continue
+                        
+                        last_chunk_next = chunk
+                        delta = getattr(chunk.choices[0], 'delta', None)
+                        if delta is None:
+                            # 检查finish_reason
+                            finish_reason = getattr(chunk.choices[0], 'finish_reason', None)
+                            if finish_reason:
+                                print(f"[MCP] 检测到finish_reason: {finish_reason}")
+                            if finish_reason == 'tool_calls':
+                                tool_call_detected_next = True
+                                print(f"[MCP] 检测到工具调用（通过finish_reason）")
+                            continue
+                        
+                        # 检测工具调用
+                        if hasattr(delta, 'tool_calls') and delta.tool_calls:
                             tool_call_detected_next = True
-                        continue
+                            print(f"[MCP] 检测到工具调用（通过delta.tool_calls）")
+                        elif self._detect_tool_call_trigger(temp_content_for_check, delta, chunk):
+                            tool_call_detected_next = True
+                            print(f"[MCP] 检测到工具调用（通过trigger检测）")
+                        
+                        content = getattr(delta, 'content', None)
+                        if content:
+                            temp_content_for_check += content
+                            accumulated_content_next += content
+                            # 在MCP循环中，只输出不传递给TTS
+                            self.llm_printer.print_to_window(content)
                     
-                    # 检测工具调用
-                    if hasattr(delta, 'tool_calls') and delta.tool_calls:
-                        tool_call_detected_next = True
-                    elif self._detect_tool_call_trigger(temp_content_for_check, delta, chunk):
-                        tool_call_detected_next = True
-                    
-                    content = getattr(delta, 'content', None)
-                    if content:
-                        temp_content_for_check += content
-                        accumulated_content_next += content
-                        # 在MCP循环中，只输出不传递给TTS
-                        self.llm_printer.print_to_window(content)
+                    print(f"[MCP] 流式响应处理完成，共处理 {chunk_count} 个chunk")
+                except Exception as e:
+                    print(f"[MCP] 处理流式响应时出错: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # 如果处理失败，假设没有工具调用，准备退出循环
+                    tool_call_detected_next = False
                 
                 # 检查最后一个chunk的finish_reason
                 if last_chunk_next and hasattr(last_chunk_next.choices[0], 'finish_reason'):
                     finish_reason = last_chunk_next.choices[0].finish_reason
+                    print(f"[MCP] 流式响应完成，finish_reason: {finish_reason}")
                     if finish_reason == 'tool_calls':
                         tool_call_detected_next = True
+                        print(f"[MCP] 通过finish_reason确认有工具调用")
+                
+                print(f"[MCP] 工具调用检测结果: tool_call_detected_next={tool_call_detected_next}, 累积内容长度={len(accumulated_content_next)}")
                 
                 # 如果没有检测到工具调用，获取完整内容并退出循环
                 if not tool_call_detected_next:
+                    print(f"[MCP] 未检测到新的工具调用，准备获取最终回复并退出循环...")
                     # 使用流式响应来获取最终回复，保持流式传递给TTS
                     final_response = self.client.chat.completions.create(
                         model=self.model_name,

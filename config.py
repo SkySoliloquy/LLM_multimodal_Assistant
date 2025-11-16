@@ -86,18 +86,34 @@ class Config:
     
     # MCP配置
     MCP_ENABLED = True  # 是否启用MCP功能
+    MCP_TOOL_CALL_SOUND = r"resource/mcp_tool_call.wav"  # MCP工具调用提示音效文件路径
     MCP_SERVERS = [
-        {
-            "name": "bing-search",
-            "type": "http",
-            "url": "https://mcp.api-inference.modelscope.net/42ef267912fb46/mcp",
-            "headers": {}
-        },
         {
             "name": "local-calculator",
             "type": "stdio",
             "command": "python",
             "args": ["mcp_tool/local_calculator_server.py"]
+        },
+        {
+            "name": "crawl4ai",
+            "type": "stdio",
+            "command": "python",
+            "args": ["-X", "utf8", "mcp_tool/crawl4ai-mcp-server-main/src/index.py"],
+            "env": {
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONUTF8": "1"
+            }
+        },
+        {
+            "name": "dida365",
+            "type": "stdio",
+            "command": "python",
+            "args": ["-X", "utf8", "mcp_tool/dida365/server.py"],
+            "env": {
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONUTF8": "1",
+                "DIDA365_TOKEN": "Bearer bc87482f-efa9-48e1-8049-8b7e948f886d"
+            }
         }
         # 可以添加更多服务器
     ]
@@ -217,6 +233,7 @@ class Config:
         """获取MCP配置"""
         return {
             "enabled": cls.MCP_ENABLED,
+            "tool_call_sound": cls.MCP_TOOL_CALL_SOUND,
             "servers": cls.MCP_SERVERS
         }
     

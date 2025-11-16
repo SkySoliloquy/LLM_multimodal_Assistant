@@ -138,6 +138,10 @@ class VoiceChatSystem:
             max_chunk_size=streaming_config["max_chunk_size"],
             split_punctuation=streaming_config["split_punctuation"],
         )
+        
+        # 获取MCP配置
+        mcp_config = Config.get_mcp_config()
+        self.mcp_tool_call_sound = mcp_config.get("tool_call_sound", None)
 
         # 设置实时语音回调
         self._setup_realtime_voice_callbacks()
@@ -361,9 +365,20 @@ class VoiceChatSystem:
             self.streaming_tts_manager.add_text(content)
     
     def _flush_tts_buffer(self):
-        """强制处理TTS缓冲区中的剩余文本"""
+        """强制处理TTS缓冲区中的剩余文本，并播放工具调用音效"""
         if self.streaming_tts_enabled and self.tts_enabled and self.streaming_tts_manager:
             self.streaming_tts_manager.flush_buffer()
+            # 播放工具调用音效
+            self._play_tool_call_sound()
+    
+    def _play_tool_call_sound(self):
+        """播放工具调用音效"""
+        if not self.mcp_tool_call_sound:
+            return
+        
+        if self.streaming_tts_enabled and self.tts_enabled and self.streaming_tts_manager:
+            print(f"[MCP] 播放工具调用音效: {self.mcp_tool_call_sound}")
+            self.streaming_tts_manager.add_sound_effect(self.mcp_tool_call_sound)
 
     def _on_llm_complete(self, result: dict):
         """LLM完成回调"""

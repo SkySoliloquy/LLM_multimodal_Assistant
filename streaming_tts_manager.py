@@ -399,6 +399,26 @@ class StreamingTTSManager:
         except Exception as e:
             self.sensor_printer.print_to_window(f"❌ 合成语音块异常: {e}")
     
+    def add_sound_effect(self, sound_file_path: str):
+        """
+        添加音效到播放队列
+        
+        Args:
+            sound_file_path: 音效文件路径
+        """
+        import os
+        if not os.path.exists(sound_file_path):
+            print(f"[TTS] 警告: 音效文件不存在: {sound_file_path}")
+            return
+        
+        # 将音效文件添加到播放队列
+        self.audio_queue.put(sound_file_path)
+        print(f"[TTS] 音效已添加到播放队列: {sound_file_path}")
+        
+        # 开始播放（如果还没有播放）
+        if not self.is_playing:
+            self._start_playback()
+    
     def _start_playback(self):
         """开始播放"""
         if self.is_playing:
@@ -428,8 +448,10 @@ class StreamingTTSManager:
                 # 播放音频
                 self._play_audio_file(audio_path)
                 
-                # 清理文件
-                self._cleanup_file(audio_path)
+                # 清理文件（仅清理临时生成的TTS音频文件，不清理音效资源文件）
+                # 临时文件通常以"streaming_tts_"开头
+                if audio_path.startswith("streaming_tts_"):
+                    self._cleanup_file(audio_path)
                 
             except Exception as e:
                 print(f"❌ 播放循环异常: {e}")
@@ -445,6 +467,12 @@ class StreamingTTSManager:
         """播放音频文件"""
         try:
             import pygame
+            import os
+            
+            # 检查文件是否存在
+            if not os.path.exists(audio_path):
+                print(f"[TTS] 警告: 音频文件不存在: {audio_path}")
+                return
             
             pygame.mixer.init()
             pygame.mixer.music.load(audio_path)
