@@ -7,10 +7,12 @@
 import time
 import threading
 import queue
+import os
 from typing import Optional, Callable, List
 from collections import deque
 from gpt_sovits_client import GPTSoVITSClient
 from AddWindows import NewWindowPrinter
+from phonetic.eng_to_zh_phonetic import EngToZhPhonetic
 
 class StreamingTTSManager:
     """流式TTS管理器"""
@@ -63,6 +65,16 @@ class StreamingTTSManager:
 
         #创建新窗口
         self.sensor_printer = NewWindowPrinter(window_name="语音合成数据窗口")
+
+        # 初始化英文转中文谐音转换器（复用实例，避免重复加载映射文件）
+        # 构建映射文件路径：streaming_tts_manager.py在项目根目录，映射文件在phonetic子目录
+        mapping_file_path = os.path.join(os.path.dirname(__file__), 
+                                         'phonetic', 'eng_to_zh_phonetic_mapping.txt')
+        if os.path.exists(mapping_file_path):
+            self.phonetic_converter = EngToZhPhonetic(mapping_file_path)
+        else:
+            # 如果映射文件不存在，使用基础字母发音替换
+            self.phonetic_converter = EngToZhPhonetic()
 
         # 统计信息
         self.stats = {
@@ -361,7 +373,10 @@ class StreamingTTSManager:
             # 生成唯一的输出文件名
             timestamp = int(time.time() * 1000)  # 使用毫秒时间戳
             output_path = f"streaming_tts_{timestamp}.wav"
-            
+
+            # 文字预处理（使用已初始化的转换器实例，避免重复加载）
+            chunk = self.phonetic_converter.convert_text(chunk, convert_mode='smart')
+
             # 调用TTS合成
             success = self.tts_client.text_to_speech(
                 text=chunk,

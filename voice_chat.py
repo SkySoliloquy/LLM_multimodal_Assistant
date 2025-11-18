@@ -343,10 +343,10 @@ class VoiceChatSystem:
 
             # 每4轮对话保存一次记忆
             if len(self.memory.conversation_buffer) >= 8:
-                self.memory._save_conversation_memory()
-                for i in self.memory.conversation_buffer:
-                    print(i)
-                self.memory.conversation_buffer = []
+                #self.memory._save_conversation_memory()
+                #for i in self.memory.conversation_buffer:
+                    #print(i)
+                #self.memory.conversation_buffer = []
                 print("已保存记忆")
 
         else:
