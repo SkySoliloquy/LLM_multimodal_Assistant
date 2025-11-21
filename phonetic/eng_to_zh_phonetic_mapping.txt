@@ -4,11 +4,11 @@
 # 不区分大小写
 
 # 常见缩写
-AI=欸艾
+AI=诶艾
 ML=艾姆艾勒
 DL=地艾勒
-GPU=既屁由
-CPU=西屁由
+GPU=既屁优
+CPU=西屁优
 API=欸屁艾
 HTTP=艾尺提提皮
 HTTPS=艾尺提提皮艾斯
@@ -16,7 +16,7 @@ URL=由阿尔艾勒
 HTML=艾尺提艾姆艾勒
 CSS=西艾斯艾斯
 JS=杰艾斯
-JSON=杰艾斯哦艾恩
+JSON=接甚
 XML=艾克斯艾姆艾勒
 
 # 技术术语
@@ -49,8 +49,8 @@ MongoDB=艾姆哦艾恩基哦地比
 Redis=阿尔地艾斯
 
 # 开发工具
-Git=基提
-GitHub=基提哈比
+Git=既特
+GitHub=既特哈不
 Docker=到可尔
 Kubernetes=开由伯内提斯
 

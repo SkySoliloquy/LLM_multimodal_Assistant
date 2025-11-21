@@ -85,7 +85,7 @@ class LLMClient:
             else:
                 raise
     
-    async def _handle_tool_calls(self, tool_calls, messages):
+    async def _handle_tool_calls(self, tool_calls, messages, on_tool_execution=None, on_tool_complete=None):
         """处理工具调用（异步）"""
         if not self.mcp_manager:
             return
@@ -99,6 +99,13 @@ class LLMClient:
             
             print(f"[MCP] 调用工具: {tool_name}")
             print(f"[MCP] 参数: {tool_args}")
+            
+            # 发送工具执行开始消息
+            if on_tool_execution:
+                try:
+                    on_tool_execution(tool_name)
+                except Exception as e:
+                    print(f"[MCP] 发送工具执行开始消息失败: {e}")
             
             try:
                 # 调用工具
@@ -158,6 +165,13 @@ class LLMClient:
                 print(f"[MCP] 工具 {tool_name} 执行成功，结果已添加到消息历史")
                 print(f"[MCP] 工具 {tool_name} 处理完成，准备处理下一个工具...")
                 
+                # 发送工具执行完成消息
+                if on_tool_complete:
+                    try:
+                        on_tool_complete(tool_name)
+                    except Exception as e:
+                        print(f"[MCP] 发送工具执行完成消息失败: {e}")
+                
             except Exception as e:
                 import traceback
                 print(f"[MCP] 工具 {tool_name} 执行失败: {e}")
@@ -210,7 +224,10 @@ class LLMClient:
                        stream: bool = True,
                        on_content: Optional[Callable[[str], None]] = None,
                        on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
-                       on_tool_call_detected: Optional[Callable[[], None]] = None) -> Dict[str, Any]:
+                       on_tool_call_detected: Optional[Callable[[], None]] = None,
+                       on_mcp_iteration: Optional[Callable[[int, int, list], None]] = None,
+                       on_tool_execution: Optional[Callable[[str], None]] = None,
+                       on_tool_complete: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
         """
         发送聊天完成请求（支持流式MCP工具调用检测）
         
@@ -408,6 +425,13 @@ class LLMClient:
                 tool_call_iteration += 1
                 print(f"[MCP] 第 {tool_call_iteration} 次工具调用循环")
                 
+                # 发送MCP循环迭代消息
+                if on_mcp_iteration:
+                    try:
+                        on_mcp_iteration(tool_call_iteration, max_tool_call_iterations)
+                    except Exception as e:
+                        print(f"[MCP] 发送迭代消息失败: {e}")
+                
                 # 如果是第3次，提醒LLM这是最后一次（在第3次之前添加）
                 if tool_call_iteration == max_tool_call_iterations:
                     reminder_message = {
@@ -442,6 +466,14 @@ class LLMClient:
                 
                 print(f"[MCP] LLM请求使用 {len(tool_calls)} 个工具")
                 
+                # 发送工具调用消息
+                if on_mcp_iteration:
+                    try:
+                        tool_names = [tc.function.name for tc in tool_calls]
+                        on_mcp_iteration(tool_call_iteration, max_tool_call_iterations, tool_names)
+                    except Exception as e:
+                        print(f"[MCP] 发送工具调用消息失败: {e}")
+                
                 # 添加助手消息（包含工具调用）到消息历史
                 assistant_message = {
                     "role": "assistant",
@@ -463,7 +495,24 @@ class LLMClient:
                 if self.mcp_manager:
                     try:
                         print(f"[MCP] 开始处理工具调用（异步）...")
-                        self._run_async(self._handle_tool_calls(tool_calls, messages_copy))
+                                # 执行工具调用（同步等待，确保工具执行完成）
+                        import asyncio
+                        try:
+                            # 检查是否已有事件循环
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                # 如果事件循环正在运行，使用线程执行
+                                import concurrent.futures
+                                with concurrent.futures.ThreadPoolExecutor() as executor:
+                                    future = executor.submit(asyncio.run, self._handle_tool_calls(tool_calls, messages_copy, on_tool_execution, on_tool_complete))
+                                    future.result()  # 等待完成
+                            else:
+                                # 如果事件循环未运行，直接运行
+                                asyncio.run(self._handle_tool_calls(tool_calls, messages_copy, on_tool_execution, on_tool_complete))
+                        except RuntimeError:
+                            # 如果获取事件循环失败，创建新的
+                            asyncio.run(self._handle_tool_calls(tool_calls, messages_copy, on_tool_execution, on_tool_complete))
+                        
                         print(f"[MCP] 工具调用处理完成")
                     except Exception as e:
                         print(f"[MCP] 处理工具调用失败: {e}")

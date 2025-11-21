@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>控制台</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='m5.ico') }}" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <!-- Socket.IO客户端库 -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <div style="padding: 20px; text-align: center; color: #666;">
+        <p>正在加载...</p>
+      </div>
+    </div>
+    <!-- 导入聊天模块（非模块格式，必须先加载） -->
+    <script src="{{ url_for('static', filename='chat.js') }}"></script>
+    <!-- 导入主应用（ES6模块） -->
+    <script src="{{ url_for('static', filename='app-integrated.js') }}" type="module"></script>
+  </body>
+</html>
+

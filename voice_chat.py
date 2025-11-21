@@ -165,14 +165,49 @@ class VoiceChatSystem:
         """初始化MCP连接（异步）"""
         if self.mcp_manager:
             try:
-                # 在新的事件循环中运行
-                asyncio.run(self._async_initialize_mcp())
+                # 检查是否已有事件循环在运行
+                try:
+                    loop = asyncio.get_running_loop()
+                    # 如果有运行中的事件循环，在新线程中运行
+                    import threading
+                    def run_in_thread():
+                        try:
+                            # 创建新的事件循环
+                            new_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(new_loop)
+                            try:
+                                new_loop.run_until_complete(self._async_initialize_mcp())
+                            finally:
+                                # 确保事件循环正确关闭
+                                try:
+                                    pending = asyncio.all_tasks(new_loop)
+                                    for task in pending:
+                                        task.cancel()
+                                    if pending:
+                                        new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                                except:
+                                    pass
+                                new_loop.close()
+                        except Exception as e:
+                            print(f"[MCP] 线程中初始化失败: {e}")
+                            import traceback
+                            print(f"[MCP] 详细错误: {traceback.format_exc()}")
+                    thread = threading.Thread(target=run_in_thread, daemon=True)
+                    thread.start()
+                    thread.join(timeout=30)  # 等待最多30秒
+                except RuntimeError:
+                    # 没有运行中的事件循环，直接运行
+                    try:
+                        asyncio.run(self._async_initialize_mcp())
+                    except Exception as e:
+                        print(f"[MCP] 直接初始化失败: {e}")
+                        import traceback
+                        print(f"[MCP] 详细错误: {traceback.format_exc()}")
             except Exception as e:
                 print(f"[MCP] 错误: MCP服务器连接失败: {e}")
                 print("[MCP] 将继续运行，但不使用MCP功能")
-                self.mcp_manager = None
-                # 更新LLM客户端的MCP管理器
-                self.llm_client.mcp_manager = None
+                import traceback
+                print(f"[MCP] 详细错误: {traceback.format_exc()}")
     
     async def _async_initialize_mcp(self):
         """异步初始化MCP连接"""
@@ -343,10 +378,10 @@ class VoiceChatSystem:
 
             # 每4轮对话保存一次记忆
             if len(self.memory.conversation_buffer) >= 8:
-                #self.memory._save_conversation_memory()
-                #for i in self.memory.conversation_buffer:
-                    #print(i)
-                #self.memory.conversation_buffer = []
+                self.memory._save_conversation_memory()
+                for i in self.memory.conversation_buffer:
+                    print(i)
+                self.memory.conversation_buffer = []
                 print("已保存记忆")
 
         else:

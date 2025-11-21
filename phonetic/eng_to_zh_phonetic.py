@@ -36,6 +36,10 @@ class EngToZhPhonetic:
         # 键为大写版本，值存储原始大小写版本和对应的谐音
         self.word_map = {}  # 格式: {大写键: {'phonetic': 谐音, 'original': 原始大小写}}
         
+        # 需要移除的特殊字符（这些字符会被TTS读出来，所以移除它们）
+        # 默认移除连字符、下划线等，可根据需要扩展
+        self.chars_to_remove = {'-', '_'}  # 可以扩展更多字符
+        
         # 如果提供了映射文件，加载它
         if mapping_file:
             self.load_custom_mapping(mapping_file)
@@ -121,6 +125,22 @@ class EngToZhPhonetic:
         
         return ''.join(result)
     
+    def _remove_special_chars(self, text: str) -> str:
+        """
+        移除特殊字符（这些字符会被TTS读出来，如"-"会被读作"减"）
+        
+        Args:
+            text: 需要清理的文本
+            
+        Returns:
+            清理后的文本
+        """
+        result = []
+        for char in text:
+            if char not in self.chars_to_remove:
+                result.append(char)
+        return ''.join(result)
+    
     def convert_text(self, text: str, convert_mode: str = 'smart') -> str:
         """
         将文本中的英文转换为中文谐音
@@ -133,16 +153,19 @@ class EngToZhPhonetic:
                 - 'preserve': 保留原文本，在英文后添加谐音（格式：英文(谐音)），仅全大写或热词
         
         Returns:
-            转换后的文本
+            转换后的文本（已移除特殊字符如"-"）
         """
         if convert_mode == 'smart':
-            return self._convert_smart(text)
+            result = self._convert_smart(text)
         elif convert_mode == 'all':
-            return self._convert_all(text)
+            result = self._convert_all(text)
         elif convert_mode == 'preserve':
-            return self._convert_preserve(text)
+            result = self._convert_preserve(text)
         else:
             raise ValueError(f"不支持的转换模式: {convert_mode}")
+        
+        # 移除特殊字符（如"-"会被TTS读作"减"，所以移除它）
+        return self._remove_special_chars(result)
     
     def _convert_smart(self, text: str) -> str:
         """智能模式：只转换全大写的英文单词或自定义热词（支持大小写）"""
@@ -236,6 +259,14 @@ class EngToZhPhonetic:
             self.letter_map[letter.lower()] = phonetic
         elif letter.islower():
             self.letter_map[letter.upper()] = phonetic
+    
+    def add_char_to_remove(self, char: str):
+        """添加需要移除的特殊字符"""
+        self.chars_to_remove.add(char)
+    
+    def remove_char_to_remove(self, char: str):
+        """移除不再需要过滤的特殊字符"""
+        self.chars_to_remove.discard(char)
 
 
 # 便捷函数
