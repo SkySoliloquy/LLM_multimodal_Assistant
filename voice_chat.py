@@ -36,6 +36,15 @@ class VoiceChatSystem:
     """语音对话系统"""
 
     def __init__(self):
+        # WebSocket回调（可由前端注册）：
+        # {
+        #   'on_transcribed': callable(str),
+        #   'on_content': callable(str),
+        #   'on_complete': callable(dict),
+        #   'on_system': callable(str)
+        # }
+        self.websocket_callbacks = {}
+
         """初始化语音对话系统"""
         # 验证配置
         if not Config.validate_config():
@@ -243,12 +252,14 @@ class VoiceChatSystem:
             # 显示当前语音检测状态
             status = self.realtime_voice_recorder.get_status()
             print(f"   语音检测状态: 能量阈值={status.get('energy_threshold', 'N/A')}")
+            self._emit_system("🗣️ 检测到语音开始...")
 
         def on_speech_end(audio_data: np.ndarray):
             print("⏹️ 语音结束，开始识别...")
             # 显示语音段信息
             duration = len(audio_data) / 16000
             print(f"   语音段长度: {duration:.2f}秒")
+            self._emit_system("⏹️ 语音结束，开始识别...")
             self._process_realtime_audio(audio_data)
 
         def on_audio_data(audio_data: np.ndarray):
@@ -280,17 +291,34 @@ class VoiceChatSystem:
             on_playback_complete=on_playback_complete
         )
 
+    def _emit_system(self, message: str):
+        cb = self.websocket_callbacks.get('on_system') if hasattr(self, 'websocket_callbacks') else None
+        if callable(cb):
+            try:
+                cb(message)
+            except Exception as _:
+                pass
+
+    def _emit_transcribed(self, text: str):
+        cb = self.websocket_callbacks.get('on_transcribed') if hasattr(self, 'websocket_callbacks') else None
+        if callable(cb):
+            try:
+                cb(text)
+            except Exception as _:
+                pass
+
     def _process_audio(self, audio_data: np.ndarray):
         """处理录音数据"""
         try:
             # 语音转文字
             print("🔄 正在转录音频...")
+            self._emit_system("🎤 正在进行语音识别...")
             asr_start_time = time.time()
 
             asr_result = self.asr.transcribe_audio_data(
                 audio_data,
                 sample_rate=self.audio_recorder.RATE,
-                language="auto"
+                language="zh"
             )
 
             asr_end_time = time.time()
@@ -303,6 +331,8 @@ class VoiceChatSystem:
             transcribed_text = asr_result["clean_text"]
             print(f"✅ 识别结果: {transcribed_text}")
             print(f"⏱️ ASR耗时: {format_duration(asr_duration)}")
+            # 前端回显识别文本
+            self._emit_transcribed(transcribed_text)
 
             # 发送给LLM
             self._chat_with_llm(transcribed_text)
@@ -315,12 +345,13 @@ class VoiceChatSystem:
         try:
             # 语音转文字
             print("🔄 正在转录音频...")
+            self._emit_system("🎤 正在进行语音识别...")
             asr_start_time = time.time()
 
             asr_result = self.asr.transcribe_audio_data(
                 audio_data,
                 sample_rate=16000,
-                language="auto"
+                language="zh"
             )
 
             asr_end_time = time.time()
@@ -333,14 +364,14 @@ class VoiceChatSystem:
             transcribed_text = asr_result["clean_text"]
             print(f"✅ 识别结果: {transcribed_text}")
             print(f"⏱️ ASR耗时: {format_duration(asr_duration)}")
-
+            # 前端回显识别文本
+            self._emit_transcribed(transcribed_text)
 
             # 发送给LLM,添加过滤器
             import filtered_input as fi
 
             if fi.filter_symbol(transcribed_text):
                 self._chat_with_llm(transcribed_text)
-
 
         except Exception as e:
             print(f"❌ 处理实时音频失败: {e}")
@@ -354,12 +385,24 @@ class VoiceChatSystem:
         self.chat_manager.add_user_message(user_message)
 
         # 调用LLM客户端
+        # 组合工具事件回调：先刷新TTS缓冲，再向前端发事件
+        def _on_tool_call_detected_wrapper():
+            if self.streaming_tts_enabled and self.tts_enabled:
+                try:
+                    self._flush_tts_buffer()
+                except Exception:
+                    pass
+            self._emit_tool_call_detected()
+        
         result = self.llm_client.chat_completion(
             messages=self.chat_manager.get_messages(),
             stream=True,
-            on_content=self._on_llm_content if self.streaming_tts_enabled and self.tts_enabled else None,
+            on_content=self._on_llm_content,  # 始终回调，用于前端流式显示
             on_complete=self._on_llm_complete,
-            on_tool_call_detected=self._flush_tts_buffer if self.streaming_tts_enabled and self.tts_enabled else None
+            on_tool_call_detected=_on_tool_call_detected_wrapper,
+            on_mcp_iteration=self._emit_mcp_iteration,
+            on_tool_execution=self._emit_tool_execution,
+            on_tool_complete=self._emit_tool_complete
         )
 
         if result["success"]:
@@ -388,8 +431,48 @@ class VoiceChatSystem:
             print(f"❌ LLM对话失败: {result.get('error', '未知错误')}")
 
 
+    def _emit_tool_call_detected(self):
+        cb = self.websocket_callbacks.get('on_tool_call_detected') if hasattr(self, 'websocket_callbacks') else None
+        if callable(cb):
+            try:
+                cb()
+            except Exception:
+                pass
+
+    def _emit_mcp_iteration(self, iteration: int, max_iterations: int, tool_names: list | None = None):
+        cb = self.websocket_callbacks.get('on_mcp_iteration') if hasattr(self, 'websocket_callbacks') else None
+        if callable(cb):
+            try:
+                cb(iteration, max_iterations, tool_names or [])
+            except Exception:
+                pass
+
+    def _emit_tool_execution(self, tool_name: str):
+        cb = self.websocket_callbacks.get('on_tool_execution') if hasattr(self, 'websocket_callbacks') else None
+        if callable(cb):
+            try:
+                cb(tool_name)
+            except Exception:
+                pass
+
+    def _emit_tool_complete(self, tool_name: str):
+        cb = self.websocket_callbacks.get('on_tool_complete') if hasattr(self, 'websocket_callbacks') else None
+        if callable(cb):
+            try:
+                cb(tool_name)
+            except Exception:
+                pass
+
     def _on_llm_content(self, content: str):
         """LLM流式内容回调"""
+        # 无论是否启用TTS，都向前端回推流式文本
+        cb = self.websocket_callbacks.get('on_content') if hasattr(self, 'websocket_callbacks') else None
+        if callable(cb):
+            try:
+                cb(content)
+            except Exception:
+                pass
+
         if self.streaming_tts_enabled and self.tts_enabled:
             # 如果还没开始流式处理，启动它
             if not self.is_streaming_response:
@@ -417,6 +500,13 @@ class VoiceChatSystem:
 
     def _on_llm_complete(self, result: dict):
         """LLM完成回调"""
+        # 向前端发送完成事件
+        cb = self.websocket_callbacks.get('on_complete') if hasattr(self, 'websocket_callbacks') else None
+        if callable(cb):
+            try:
+                cb(result)
+            except Exception:
+                pass
         if result["success"] and self.streaming_tts_enabled and self.tts_enabled:
             # 停止流式TTS处理
             self.streaming_tts_manager.stop_streaming()

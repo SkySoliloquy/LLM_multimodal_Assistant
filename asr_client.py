@@ -11,6 +11,7 @@ import torchaudio
 from typing import Dict, Any, Optional
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
+import re
 
 
 class SenseVoiceASRDirect:
@@ -30,6 +31,25 @@ class SenseVoiceASRDirect:
         self.vad_model_dir = vad_model_dir or r"C:\Users\Administrator\.cache\modelscope\hub\models\iic\speech_fsmn_vad_zh-cn-16k-common-pytorch"
         self.model = None
         self._load_model()
+    
+    def _dedup_text(self, text: str) -> str:
+        """去除明显的重复词/字符噪声，尽量不伤害自然重复（如“看看”）
+        规则：
+        - 连续>=3的同一字符，压缩为2个：我我我我 → 我我
+        - 连续重复的二字词（长度2的子串）>=2次，压缩为1次：刚刚刚刚 → 刚刚
+        - 规范多余的逗号
+        """
+        if not text:
+            return text
+        # 连续>=3相同字符 → 2个
+        text = re.sub(r"(.)\1{2,}", r"\1\1", text)
+        # 连续重复的二字词： (..) (..) (+) → 保留1次
+        text = re.sub(r"((..))\1{1,}", r"\1", text)
+        # 多逗号归一
+        text = re.sub(r"[，,]{2,}", "，", text)
+        # 多空格归一
+        text = re.sub(r"\s{2,}", " ", text)
+        return text
     
     def _load_model(self) -> None:
         """加载模型"""
@@ -79,6 +99,8 @@ class SenseVoiceASRDirect:
             if result and len(result) > 0:
                 raw_text = result[0]["text"]
                 clean_text = rich_transcription_postprocess(raw_text)
+                # 额外去重清洗：将>=3次连续重复的同一汉字/字符压缩为2次，避免“我我我/刚刚刚”类误识别
+                clean_text = self._dedup_text(clean_text)
                 
                 return {
                     "success": True,

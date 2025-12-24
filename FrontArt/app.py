@@ -141,14 +141,15 @@ def get_or_create_session(session_id: Optional[str] = None, emit_to_room=None) -
                 while loading_monitor_active and progress < 95:
                     time.sleep(2)  # 每2秒更新一次
                     iteration += 1
-                    
-                    # 在前40%范围内逐渐增加进度
-                    if progress < 38:
-                        progress += 2
+
+                    # 逐步增加到90%，给用户真实进展感
+                    if progress < 90:
+                        # 前40%加快推进，之后缓慢逼近90%
+                        inc = 3 if progress < 40 else 1
+                        progress = min(progress + inc, 90)
                         emit_loading_progress(f"加载ASR模型中... ({iteration * 2}秒)", progress, room=emit_to_room)
-                    elif progress < 95:
-                        # 如果加载时间较长，保持在38%左右
-                        emit_loading_progress(f"加载ASR模型中... ({iteration * 2}秒，可能需要30-60秒）", 38, room=emit_to_room)
+                    else:
+                        emit_loading_progress(f"加载ASR模型中... ({iteration * 2}秒，可能需要30-60秒）", progress, room=emit_to_room)
             
             # 启动进度监控线程
             monitor_thread = threading.Thread(target=progress_monitor, daemon=True)
@@ -160,6 +161,29 @@ def get_or_create_session(session_id: Optional[str] = None, emit_to_room=None) -
                 print(f"[会话] 开始创建VoiceChatSystem实例...")
                 system = VoiceChatSystem()
                 print(f"[会话] VoiceChatSystem实例创建成功")
+
+                # 将系统事件转发到当前WebSocket房间
+                try:
+                    def make_emitters(room_id, sess_id):
+                        def _emit(event, payload):
+                            socketio.emit(event, payload, room=room_id)
+                            try:
+                                socketio.sleep(0)
+                            except Exception:
+                                pass
+                        return {
+                            'on_system': lambda msg: _emit('system_message', {'type': 'system', 'message': msg, 'session_id': sess_id}),
+                            'on_transcribed': lambda text: _emit('transcribed', {'text': text, 'session_id': sess_id}),
+                            'on_content': lambda content: _emit('llm_content', {'content': content, 'session_id': sess_id}),
+                            'on_complete': lambda result: _emit('llm_complete', {'content': result.get('content',''), 'session_id': sess_id}),
+                            'on_tool_call_detected': lambda: _emit('system_message', {'type': 'tool_call', 'message': '🔧 工具调用开始', 'session_id': sess_id}),
+                            'on_mcp_iteration': lambda iteration, max_iterations, tool_names=None: _emit('system_message', {'type': 'mcp_iteration', 'iteration': iteration, 'max_iterations': max_iterations, 'tool_names': (tool_names or []), 'message': f'🔄 MCP循环 {iteration}/{max_iterations}', 'session_id': sess_id}),
+                            'on_tool_execution': lambda tool_name: _emit('system_message', {'type': 'tool_execution', 'tool_name': tool_name, 'message': f'⚙️ 执行工具: {tool_name}', 'session_id': sess_id}),
+                            'on_tool_complete': lambda tool_name: _emit('system_message', {'type': 'tool_complete', 'tool_name': tool_name, 'message': f'✅ 工具完成: {tool_name}', 'session_id': sess_id}),
+                        }
+                    system.websocket_callbacks = make_emitters(emit_to_room, session_id)
+                except Exception as e:
+                    print(f"[会话] 注册Web回调失败: {e}")
                 
                 # 系统初始化完成，停止监控并发送最终进度
                 loading_monitor_active = False
@@ -367,7 +391,7 @@ def chat_audio():
             asr_result = system.asr.transcribe_audio_data(
                 audio_data,
                 sample_rate=sample_rate,
-                language="auto"
+                language="zh"
             )
             
             if "error" in asr_result:
@@ -478,12 +502,40 @@ def create_session():
 def handle_connect():
     """处理WebSocket连接"""
     print(f"[WebSocket] 客户端连接: {request.sid}")
-    
+
     # 检查默认会话是否已存在，如果存在则立即通知前端
     if default_session_id in sessions:
         emit('loading_complete', {'session_id': default_session_id})
         print(f"[WebSocket] 会话已存在，立即发送 loading_complete (会话: {default_session_id})")
-    
+        try:
+            system = sessions[default_session_id]
+            # 为当前连接注册回调到该房间
+            def make_emitters(room_id, sess_id):
+                def _emit(event, payload):
+                    socketio.emit(event, payload, room=room_id)
+                    try:
+                        socketio.sleep(0)
+                    except Exception:
+                        pass
+                return {
+                    'on_system': lambda msg: _emit('system_message', {'type': 'system', 'message': msg, 'session_id': sess_id}),
+                    'on_transcribed': lambda text: _emit('transcribed', {'text': text, 'session_id': sess_id}),
+                    'on_content': lambda content: _emit('llm_content', {'content': content, 'session_id': sess_id}),
+                    'on_complete': lambda result: _emit('llm_complete', {'content': result.get('content',''), 'session_id': sess_id}),
+                    'on_tool_call_detected': lambda: _emit('system_message', {'type': 'tool_call', 'message': '🔧 工具调用开始', 'session_id': sess_id}),
+                    'on_mcp_iteration': lambda iteration, max_iterations, tool_names=None: _emit('system_message', {'type': 'mcp_iteration', 'iteration': iteration, 'max_iterations': max_iterations, 'tool_names': (tool_names or []), 'message': f'🔄 MCP循环 {iteration}/{max_iterations}', 'session_id': sess_id}),
+                    'on_tool_execution': lambda tool_name: _emit('system_message', {'type': 'tool_execution', 'tool_name': tool_name, 'message': f'⚙️ 执行工具: {tool_name}', 'session_id': sess_id}),
+                    'on_tool_complete': lambda tool_name: _emit('system_message', {'type': 'tool_complete', 'tool_name': tool_name, 'message': f'✅ 工具完成: {tool_name}', 'session_id': sess_id}),
+                }
+            system.websocket_callbacks = make_emitters(request.sid, default_session_id)
+            socketio.emit('state_update', {
+                'session_id': default_session_id,
+                'tts_enabled': getattr(system, 'tts_enabled', False),
+                'realtime_voice_enabled': getattr(system, 'realtime_voice_enabled', False)
+            }, room=request.sid)
+        except Exception as e:
+            print(f"[WebSocket] 发送状态失败: {e}")
+
     emit('connected', {'message': '连接成功'})
 
 
@@ -498,6 +550,16 @@ def handle_start_loading(data):
         # 如果会话已存在，立即发送完成事件并返回
         if session_id in sessions:
             socketio.emit('loading_complete', {'session_id': session_id}, room=request.sid)
+            # 同步当前状态
+            try:
+                system = sessions[session_id]
+                socketio.emit('state_update', {
+                    'session_id': session_id,
+                    'tts_enabled': getattr(system, 'tts_enabled', False),
+                    'realtime_voice_enabled': getattr(system, 'realtime_voice_enabled', False)
+                }, room=request.sid)
+            except Exception as e:
+                print(f"[加载] 同步状态失败: {e}")
             print(f"[加载] 会话已存在，立即发送 loading_complete (会话: {session_id}, 房间: {request.sid})")
             return
         
@@ -511,6 +573,15 @@ def handle_start_loading(data):
                 session_id_result, system = get_or_create_session(session_id, emit_to_room=client_sid)
                 # 即使MCP初始化有警告，也认为系统加载成功
                 socketio.emit('loading_complete', {'session_id': session_id_result}, room=client_sid)
+                # 会话就绪后同步状态
+                try:
+                    socketio.emit('state_update', {
+                        'session_id': session_id_result,
+                        'tts_enabled': getattr(system, 'tts_enabled', False),
+                        'realtime_voice_enabled': getattr(system, 'realtime_voice_enabled', False)
+                    }, room=client_sid)
+                except Exception as e:
+                    print(f"[加载] 发送状态失败: {e}")
             except Exception as e:
                 import traceback
                 error_msg = str(e)
@@ -552,110 +623,36 @@ def handle_text_message(data):
             return
         
         session_id, system = get_or_create_session(session_id, emit_to_room=request.sid)
-        
-        # 添加到对话历史
-        system.chat_manager.add_user_message(message)
+
+        # 重新绑定回推到当前SID，并带flush，避免流式缓冲
+        def make_emitters(room_id, sess_id):
+            def _emit(event, payload):
+                socketio.emit(event, payload, room=room_id)
+                try:
+                    socketio.sleep(0)
+                except Exception:
+                    pass
+            return {
+                'on_system': lambda msg: _emit('system_message', {'type': 'system', 'message': msg, 'session_id': sess_id}),
+                'on_transcribed': lambda text: _emit('transcribed', {'text': text, 'session_id': sess_id}),
+                'on_content': lambda content: _emit('llm_content', {'content': content, 'session_id': sess_id}),
+                'on_complete': lambda result: _emit('llm_complete', {'content': result.get('content',''), 'session_id': sess_id}),
+                'on_tool_call_detected': lambda: _emit('system_message', {'type': 'tool_call', 'message': '🔧 工具调用开始', 'session_id': sess_id}),
+                'on_mcp_iteration': lambda iteration, max_iterations, tool_names=None: _emit('system_message', {'type': 'mcp_iteration', 'iteration': iteration, 'max_iterations': max_iterations, 'tool_names': (tool_names or []), 'message': f'🔄 MCP循环 {iteration}/{max_iterations}', 'session_id': sess_id}),
+                'on_tool_execution': lambda tool_name: _emit('system_message', {'type': 'tool_execution', 'tool_name': tool_name, 'message': f'⚙️ 执行工具: {tool_name}', 'session_id': sess_id}),
+                'on_tool_complete': lambda tool_name: _emit('system_message', {'type': 'tool_complete', 'tool_name': tool_name, 'message': f'✅ 工具完成: {tool_name}', 'session_id': sess_id}),
+            }
+        system.websocket_callbacks = make_emitters(request.sid, session_id)
         
         # 发送识别结果（文本输入也使用transcribed事件，保持一致性，立即发送）
         socketio.emit('transcribed', {'text': message, 'session_id': session_id}, room=request.sid)
         socketio.sleep(0)  # 强制立即发送
-        
-        # 流式调用LLM
-        accumulated_content = ""
-        
-        def on_content(content: str):
-            """流式内容回调"""
-            nonlocal accumulated_content
-            accumulated_content += content
-            socketio.emit('llm_content', {
-                'content': content,
-                'session_id': session_id
-            }, room=request.sid)
-            # 强制立即发送，避免缓冲
-            socketio.sleep(0)
-        
-        def on_tool_call_detected():
-            """工具调用检测回调"""
-            socketio.emit('system_message', {
-                'type': 'tool_call',
-                'message': '🔧 检测到工具调用，开始处理...',
-                'session_id': session_id
-            }, room=request.sid)
-            socketio.sleep(0)  # 强制立即发送
-        
-        def on_mcp_iteration(iteration: int, max_iterations: int, tool_names: list = None):
-            """MCP循环迭代回调"""
-            if tool_names and len(tool_names) > 0:
-                socketio.emit('system_message', {
-                    'type': 'mcp_iteration',
-                    'message': f'🔄 MCP循环第 {iteration}/{max_iterations} 次: 调用工具 {", ".join(tool_names)}',
-                    'session_id': session_id
-                }, room=request.sid)
-                socketio.sleep(0)  # 强制立即发送
-            else:
-                socketio.emit('system_message', {
-                    'type': 'mcp_iteration',
-                    'message': f'🔄 MCP循环第 {iteration}/{max_iterations} 次',
-                    'session_id': session_id
-                }, room=request.sid)
-                socketio.sleep(0)  # 强制立即发送
-        
-        def on_tool_execution(tool_name: str):
-            """工具执行开始回调"""
-            socketio.emit('system_message', {
-                'type': 'tool_execution',
-                'message': f'⚙️ 开始执行工具: {tool_name}',
-                'session_id': session_id
-            }, room=request.sid)
-            socketio.sleep(0)  # 强制立即发送
-        
-        def on_tool_complete(tool_name: str):
-            """工具执行完成回调"""
-            socketio.emit('system_message', {
-                'type': 'tool_complete',
-                'message': f'✅ 工具执行完成: {tool_name}',
-                'session_id': session_id
-            }, room=request.sid)
-            socketio.sleep(0)  # 强制立即发送
-        
-        def on_complete(result: dict):
-            """完成回调"""
-            if result["success"]:
-                # 确保最终内容被发送到前端（特别是MCP调用后的回复）
-                final_content = result.get("content", "")
-                # 只在没有流式内容或MCP调用后才发送完整内容
-                # 如果已经有流式内容，finishLLMResponse会处理，这里只发送完成信号
-                if final_content and accumulated_content == "":
-                    # 没有流式内容（可能是MCP调用后的完整回复），发送完整内容
-                    system.chat_manager.add_assistant_message(final_content)
-                    socketio.emit('llm_complete', {
-                        'content': final_content,
-                        'session_id': session_id
-                    }, room=request.sid)
-                elif final_content:
-                    # 有流式内容，只发送完成信号，不覆盖流式内容
-                    system.chat_manager.add_assistant_message(final_content)
-                    socketio.emit('llm_complete', {
-                        'content': '',  # 发送空内容表示完成，由前端保持流式内容
-                        'session_id': session_id
-                    }, room=request.sid)
-            else:
-                socketio.emit('error', {
-                    'error': result.get("error", "未知错误"),
-                    'session_id': session_id
-                }, room=request.sid)
-        
-        # 调用LLM（流式）
-        result = system.llm_client.chat_completion(
-            messages=system.chat_manager.get_messages(),
-            stream=True,
-            on_content=on_content,
-            on_complete=on_complete,
-            on_tool_call_detected=on_tool_call_detected,
-            on_mcp_iteration=on_mcp_iteration,
-            on_tool_execution=on_tool_execution,
-            on_tool_complete=on_tool_complete
-        )
+
+        # 通过系统统一路径触发LLM与TTS（由VoiceChatSystem负责流式推送与TTS）
+        try:
+            system._chat_with_llm(message)
+        except Exception as e:
+            socketio.emit('error', {'error': str(e), 'session_id': session_id}, room=request.sid)
         
     except Exception as e:
         emit('error', {'error': str(e)})
@@ -674,6 +671,26 @@ def handle_audio_data(data):
             return
         
         session_id, system = get_or_create_session(session_id, emit_to_room=request.sid)
+
+        # 重新绑定回推到当前SID，并带flush，避免流式缓冲
+        def make_emitters(room_id, sess_id):
+            def _emit(event, payload):
+                socketio.emit(event, payload, room=room_id)
+                try:
+                    socketio.sleep(0)
+                except Exception:
+                    pass
+            return {
+                'on_system': lambda msg: _emit('system_message', {'type': 'system', 'message': msg, 'session_id': sess_id}),
+                'on_transcribed': lambda text: _emit('transcribed', {'text': text, 'session_id': sess_id}),
+                'on_content': lambda content: _emit('llm_content', {'content': content, 'session_id': sess_id}),
+                'on_complete': lambda result: _emit('llm_complete', {'content': result.get('content',''), 'session_id': sess_id}),
+                'on_tool_call_detected': lambda: _emit('system_message', {'type': 'tool_call', 'message': '🔧 工具调用开始', 'session_id': sess_id}),
+                'on_mcp_iteration': lambda iteration, max_iterations, tool_names=None: _emit('system_message', {'type': 'mcp_iteration', 'iteration': iteration, 'max_iterations': max_iterations, 'tool_names': (tool_names or []), 'message': f'🔄 MCP循环 {iteration}/{max_iterations}', 'session_id': sess_id}),
+                'on_tool_execution': lambda tool_name: _emit('system_message', {'type': 'tool_execution', 'tool_name': tool_name, 'message': f'⚙️ 执行工具: {tool_name}', 'session_id': sess_id}),
+                'on_tool_complete': lambda tool_name: _emit('system_message', {'type': 'tool_complete', 'tool_name': tool_name, 'message': f'✅ 工具完成: {tool_name}', 'session_id': sess_id}),
+            }
+        system.websocket_callbacks = make_emitters(request.sid, session_id)
         
         # 解码base64音频数据
         audio_bytes = base64.b64decode(audio_base64)
@@ -685,12 +702,13 @@ def handle_audio_data(data):
             'message': '🎤 正在进行语音识别...',
             'session_id': session_id
         }, room=request.sid)
+        socketio.sleep(0)
         
         # 调用ASR识别
         asr_result = system.asr.transcribe_audio_data(
             audio_array,
             sample_rate=sample_rate,
-            language="auto"
+            language="zh"
         )
         
         if "error" in asr_result:
@@ -705,113 +723,19 @@ def handle_audio_data(data):
             'message': f'✅ 语音识别完成: {transcribed_text[:30]}...',
             'session_id': session_id
         }, room=request.sid)
-        
-        # 添加到对话历史
-        system.chat_manager.add_user_message(transcribed_text)
-        
+
         # 发送识别结果（立即发送，确保前端立即显示）
         socketio.emit('transcribed', {
             'text': transcribed_text,
             'session_id': session_id
         }, room=request.sid)
         socketio.sleep(0)  # 强制立即发送
-        
-        # 流式调用LLM
-        accumulated_content = ""
-        
-        def on_content(content: str):
-            """流式内容回调"""
-            nonlocal accumulated_content
-            accumulated_content += content
-            socketio.emit('llm_content', {
-                'content': content,
-                'session_id': session_id
-            }, room=request.sid)
-            # 强制立即发送，避免缓冲
-            socketio.sleep(0)
-        
-        def on_tool_call_detected():
-            """工具调用检测回调"""
-            socketio.emit('system_message', {
-                'type': 'tool_call',
-                'message': '🔧 检测到工具调用，开始处理...',
-                'session_id': session_id
-            }, room=request.sid)
-            socketio.sleep(0)  # 强制立即发送
-        
-        def on_mcp_iteration(iteration: int, max_iterations: int, tool_names: list = None):
-            """MCP循环迭代回调"""
-            if tool_names and len(tool_names) > 0:
-                socketio.emit('system_message', {
-                    'type': 'mcp_iteration',
-                    'message': f'🔄 MCP循环第 {iteration}/{max_iterations} 次: 调用工具 {", ".join(tool_names)}',
-                    'session_id': session_id
-                }, room=request.sid)
-                socketio.sleep(0)  # 强制立即发送
-            else:
-                socketio.emit('system_message', {
-                    'type': 'mcp_iteration',
-                    'message': f'🔄 MCP循环第 {iteration}/{max_iterations} 次',
-                    'session_id': session_id
-                }, room=request.sid)
-                socketio.sleep(0)  # 强制立即发送
-        
-        def on_tool_execution(tool_name: str):
-            """工具执行开始回调"""
-            socketio.emit('system_message', {
-                'type': 'tool_execution',
-                'message': f'⚙️ 开始执行工具: {tool_name}',
-                'session_id': session_id
-            }, room=request.sid)
-            socketio.sleep(0)  # 强制立即发送
-        
-        def on_tool_complete(tool_name: str):
-            """工具执行完成回调"""
-            socketio.emit('system_message', {
-                'type': 'tool_complete',
-                'message': f'✅ 工具执行完成: {tool_name}',
-                'session_id': session_id
-            }, room=request.sid)
-            socketio.sleep(0)  # 强制立即发送
-        
-        def on_complete(result: dict):
-            """完成回调"""
-            if result["success"]:
-                # 确保最终内容被发送到前端（特别是MCP调用后的回复）
-                final_content = result.get("content", "")
-                # 只在没有流式内容或MCP调用后才发送完整内容
-                # 如果已经有流式内容，finishLLMResponse会处理，这里只发送完成信号
-                if final_content and accumulated_content == "":
-                    # 没有流式内容（可能是MCP调用后的完整回复），发送完整内容
-                    system.chat_manager.add_assistant_message(final_content)
-                    socketio.emit('llm_complete', {
-                        'content': final_content,
-                        'session_id': session_id
-                    }, room=request.sid)
-                elif final_content:
-                    # 有流式内容，只发送完成信号，不覆盖流式内容
-                    system.chat_manager.add_assistant_message(final_content)
-                    socketio.emit('llm_complete', {
-                        'content': '',  # 发送空内容表示完成，由前端保持流式内容
-                        'session_id': session_id
-                    }, room=request.sid)
-            else:
-                socketio.emit('error', {
-                    'error': result.get("error", "未知错误"),
-                    'session_id': session_id
-                }, room=request.sid)
-        
-        # 调用LLM（流式）
-        result = system.llm_client.chat_completion(
-            messages=system.chat_manager.get_messages(),
-            stream=True,
-            on_content=on_content,
-            on_complete=on_complete,
-            on_tool_call_detected=on_tool_call_detected,
-            on_mcp_iteration=on_mcp_iteration,
-            on_tool_execution=on_tool_execution,
-            on_tool_complete=on_tool_complete
-        )
+
+        # 通过系统统一路径触发LLM与TTS（由VoiceChatSystem负责流式推送与TTS）
+        try:
+            system._chat_with_llm(transcribed_text)
+        except Exception as e:
+            socketio.emit('error', {'error': str(e), 'session_id': session_id}, room=request.sid)
         
     except Exception as e:
         emit('error', {'error': str(e)})
@@ -849,6 +773,51 @@ def handle_clear_history(data):
         else:
             emit('error', {'error': '会话不存在'})
             
+    except Exception as e:
+        emit('error', {'error': str(e)})
+
+
+@socketio.on('toggle_tts')
+def handle_toggle_tts(data):
+    """切换TTS开关（WebSocket）"""
+    try:
+        session_id = data.get('session_id', default_session_id)
+        if session_id not in sessions:
+            emit('error', {'error': '会话不存在'})
+            return
+        system = sessions[session_id]
+        # 调用后端开关逻辑，保持与voice_chat一致
+        try:
+            system._toggle_tts()
+        except Exception as e:
+            print(f"[TTS] 切换失败: {e}")
+        socketio.emit('state_update', {
+            'session_id': session_id,
+            'tts_enabled': getattr(system, 'tts_enabled', False),
+            'realtime_voice_enabled': getattr(system, 'realtime_voice_enabled', False)
+        }, room=request.sid)
+    except Exception as e:
+        emit('error', {'error': str(e)})
+
+
+@socketio.on('toggle_realtime')
+def handle_toggle_realtime(data):
+    """切换实时语音识别开关（WebSocket）"""
+    try:
+        session_id = data.get('session_id', default_session_id)
+        if session_id not in sessions:
+            emit('error', {'error': '会话不存在'})
+            return
+        system = sessions[session_id]
+        try:
+            system._toggle_realtime_voice()
+        except Exception as e:
+            print(f"[Realtime] 切换失败: {e}")
+        socketio.emit('state_update', {
+            'session_id': session_id,
+            'tts_enabled': getattr(system, 'tts_enabled', False),
+            'realtime_voice_enabled': getattr(system, 'realtime_voice_enabled', False)
+        }, room=request.sid)
     except Exception as e:
         emit('error', {'error': str(e)})
 

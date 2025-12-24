@@ -1,30 +1,193 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>控制台</title>
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='m5.ico') }}" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
-    <!-- Socket.IO客户端库 -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>语音对话系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-  </head>
-  <body>
-    <div id="app">
-      <div style="padding: 20px; text-align: center; color: #666;">
-        <p>正在加载...</p>
-      </div>
-    </div>
-    <!-- 导入聊天模块（非模块格式，必须先加载） -->
-    <script src="{{ url_for('static', filename='chat.js') }}"></script>
-    <!-- 导入主应用（ES6模块） -->
-    <script src="{{ url_for('static', filename='app-integrated.js') }}" type="module"></script>
-  </body>
-</html>
+</head>
+<body>
+    <div class="container">
+        <!-- 左侧：对话区域 -->
+        <div class="chat-section">
+            <div class="header">
+                <h1>语音对话系统</h1>
+                <div class="status-indicator" id="statusIndicator">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span class="status-text" id="statusText">连接中...</span>
+                </div>
+            </div>
 
+            <!-- 加载界面 -->
+            <div class="loading-screen" id="loadingScreen">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h2>系统初始化中</h2>
+                    <p id="loadingStep">验证配置...</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p id="progressText">0%</p>
+                </div>
+            </div>
+
+            <!-- 对话区域 -->
+            <div class="messages-container" id="messagesContainer">
+                <div class="message system">
+                    <p>👋 欢迎使用语音对话系统</p>
+                </div>
+            </div>
+
+            <!-- 输入区域 -->
+            <div class="input-section">
+                <div class="input-controls">
+                    <button class="btn btn-record" id="recordBtn" title="按住录音">
+                        <span class="btn-icon">🎤</span>
+                        <span class="btn-text">录音</span>
+                    </button>
+                    <button class="btn btn-text-input" id="textInputBtn" title="文字输入">
+                        <span class="btn-icon">⌨️</span>
+                        <span class="btn-text">文字</span>
+                    </button>
+                    <button class="btn btn-history" id="historyBtn" title="查看历史">
+                        <span class="btn-icon">📜</span>
+                        <span class="btn-text">历史</span>
+                    </button>
+                    <button class="btn btn-clear" id="clearBtn" title="清空历史">
+                        <span class="btn-icon">🗑️</span>
+                        <span class="btn-text">清空</span>
+                    </button>
+                </div>
+
+                <!-- 文字输入框 -->
+                <div class="text-input-area" id="textInputArea" style="display: none;">
+                    <input type="text" id="textInput" placeholder="输入消息..." class="text-input">
+                    <button class="btn btn-send" id="sendBtn">发送</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右下角Toast容器 -->
+        <div id="toastContainer" class="toast-container"></div>
+        <!-- MCP状态卡片 -->
+        <div id="mcpStatusBox" class="mcp-status hidden">
+          <div class="mcp-header">MCP 工具调用中</div>
+          <div class="mcp-body">
+            <div class="mcp-row">
+              <div class="mcp-label">计时</div>
+              <div class="mcp-value" id="mcpTimer">00:00</div>
+            </div>
+            <div class="mcp-row">
+              <div class="mcp-label">状态</div>
+              <div class="mcp-value" id="mcpText">工具调用中...</div>
+            </div>
+            <div class="mcp-row">
+              <div class="mcp-label">工具</div>
+              <div class="mcp-tools" id="mcpTools">-</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧：设置和信息 -->
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <h3>系统状态</h3>
+                <div class="status-list">
+                    <div class="status-item">
+                        <span class="label">ASR模型</span>
+                        <span class="value" id="asrStatus">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">LLM</span>
+                        <span class="value" id="llmStatus">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">TTS</span>
+                        <span class="value" id="ttsStatus">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">MCP工具</span>
+                        <span class="value" id="mcpStatus">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>功能开关</h3>
+                <div class="toggle-list">
+                    <label class="toggle-item">
+                        <input type="checkbox" id="ttsToggle" checked>
+                        <span class="toggle-label">TTS语音合成</span>
+                    </label>
+                    <label class="toggle-item">
+                        <input type="checkbox" id="realtimeToggle">
+                        <span class="toggle-label">实时语音识别</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>快捷键</h3>
+                <div class="shortcuts">
+                    <div class="shortcut">
+                        <span class="key">Num4</span>
+                        <span class="desc">开始/停止录音</span>
+                    </div>
+                    <div class="shortcut">
+                        <span class="key">Num5</span>
+                        <span class="desc">文字输入</span>
+                    </div>
+                    <div class="shortcut">
+                        <span class="key">Num6</span>
+                        <span class="desc">查看历史</span>
+                    </div>
+                    <div class="shortcut">
+                        <span class="key">Num7</span>
+                        <span class="desc">清空历史</span>
+                    </div>
+                    <div class="shortcut">
+                        <span class="key">Num8</span>
+                        <span class="desc">切换TTS</span>
+                    </div>
+                    <div class="shortcut">
+                        <span class="key">Num9</span>
+                        <span class="desc">切换实时语音</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：查看历史 -->
+    <div class="modal" id="historyModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>对话历史</h2>
+                <button class="modal-close" id="closeHistoryBtn">&times;</button>
+            </div>
+            <div class="modal-body" id="historyContent">
+                <p>加载中...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：确认清空 -->
+    <div class="modal" id="confirmModal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2>确认操作</h2>
+            </div>
+            <div class="modal-body">
+                <p id="confirmMessage">确定要清空对话历史吗？</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" id="cancelBtn">取消</button>
+                <button class="btn btn-confirm" id="confirmBtn">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

@@ -51,6 +51,29 @@ class HTTPMCPSession:
             "Accept": "application/json, text/event-stream",
             **(headers or {})
         }
+        self._token_from_query: Optional[str] = None
+        # 兼容将 Authorization 放在查询参数中的用法：?Authorization=API_KEY
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.url)
+            qs = parse_qs(parsed.query)
+            token = None
+            # 兼容大小写
+            if "Authorization" in qs and qs["Authorization"]:
+                token = qs["Authorization"][0]
+            elif "authorization" in qs and qs["authorization"]:
+                token = qs["authorization"][0]
+            if token:
+                self._token_from_query = token
+                if "Authorization" not in self.headers:
+                    # 先原样注入（有些网关要求裸 token）
+                    self.headers["Authorization"] = token
+                # 额外提供常见的 X-API-Key 头，提升兼容性
+                if "X-API-Key" not in self.headers:
+                    self.headers["X-API-Key"] = token
+        except Exception:
+            # 任何解析错误都忽略，不影响主流程
+            pass
     
     def _get_next_id(self) -> int:
         self.request_id += 1
@@ -77,8 +100,122 @@ class HTTPMCPSession:
                 headers=headers,
                 timeout=30
             )
-            response.raise_for_status()
-            result = response.json()
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as http_err:
+                # 附带响应体前256字符，便于诊断（很多网关返回HTML或纯文本错误）
+                body_snippet = response.text[:256].replace('\n', ' ')
+                ct = response.headers.get("Content-Type", "")
+                status = response.status_code
+                raise Exception(f"HTTP Error: status={status}, content-type={ct}, body~{body_snippet}") from http_err
+            # 先根据 Content-Type 决定解析策略
+            ct = response.headers.get("Content-Type", "")
+            # 对于 SSE，强制按 UTF-8 解码，避免出现 ISO-8859-1 的默认误判导致中文乱码
+            if "event-stream" in ct:
+                response.encoding = "utf-8"
+            elif "json" in ct and not response.encoding:
+                response.encoding = "utf-8"
+            try:
+                if "text/event-stream" in ct:
+                    # 用原始字节按 UTF-8 解码，避免 requests 的编码猜测
+                    try:
+                        text = response.content.decode("utf-8")
+                    except Exception:
+                        text = response.text  # 兜底
+                    # 解析 SSE: 从事件流中提取可用 JSON（尽量鲁棒）
+                    def parse_sse_json(s: str) -> Dict[str, Any]:
+                        s = s.replace("\r\n", "\n")
+                        events = s.split("\n\n")
+                        json_candidates: list[str] = []
+                        for ev in events:
+                            if not ev.strip():
+                                continue
+                            data_lines: list[str] = []
+                            for line in ev.split("\n"):
+                                # 不要求行首，容错提取 data:
+                                idx = line.find("data:")
+                                if idx != -1:
+                                    data_lines.append(line[idx+5:].strip())
+                            if data_lines:
+                                payload = "\n".join(data_lines).strip()
+                                if payload:
+                                    json_candidates.append(payload)
+                        # 流级兜底：直接收集整段里所有 data: 行
+                        if not json_candidates:
+                            all_data_lines = [line[line.find("data:")+5:].strip() for line in s.split("\n") if "data:" in line]
+                            json_candidates.extend(all_data_lines)
+                        # 依次尝试（从最后一个事件开始）
+                        for cand in reversed(json_candidates):
+                            try:
+                                return json.loads(cand)
+                            except Exception:
+                                continue
+                        # 将所有候选合并尝试
+                        if json_candidates:
+                            try:
+                                return json.loads("\n".join(json_candidates))
+                            except Exception:
+                                pass
+                        # 再兜底：从文本中提取最后一个完整的 JSON 对象（括号配对）
+                        def extract_last_json(text: str) -> Optional[Dict[str, Any]]:
+                            in_string = False
+                            escape = False
+                            depth = 0
+                            last_start = -1
+                            candidates = []
+                            for i, ch in enumerate(text):
+                                if in_string:
+                                    if escape:
+                                        escape = False
+                                    elif ch == '\\':
+                                        escape = True
+                                    elif ch == '"':
+                                        in_string = False
+                                    continue
+                                else:
+                                    if ch == '"':
+                                        in_string = True
+                                    elif ch == '{':
+                                        if depth == 0:
+                                            last_start = i
+                                        depth += 1
+                                    elif ch == '}':
+                                        if depth > 0:
+                                            depth -= 1
+                                            if depth == 0 and last_start != -1:
+                                                candidates.append(text[last_start:i+1])
+                                                last_start = -1
+                            # 从最后一个候选开始尝试解析
+                            for cand in reversed(candidates):
+                                try:
+                                    return json.loads(cand)
+                                except Exception:
+                                    continue
+                            return None
+                        obj = extract_last_json(s)
+                        if obj is not None:
+                            return obj
+                        raise ValueError("SSE JSON not found")
+                    result = parse_sse_json(text)
+                else:
+                    # 普通 JSON
+                    result = response.json()
+            except Exception as e_json:
+                # 回退：尝试从 body 文本中提取所有 data: 行并拼接
+                try:
+                    # 直接用 UTF-8 从字节解码，避免 text 的错误编码
+                    raw_text = response.content.decode("utf-8", errors="ignore")
+                except Exception:
+                    raw_text = response.text
+                try:
+                    data_lines = [line[line.find("data:")+5:].strip() for line in raw_text.splitlines() if "data:" in line]
+                    if data_lines:
+                        result = json.loads("\n".join(data_lines))
+                    else:
+                        raise e_json
+                except Exception:
+                    body_snippet = raw_text[:512].replace('\n', ' ')
+                    raise Exception(f"JSON Decode Error (SSE): content-type={ct}, body~{body_snippet}") from e_json
             
             # 检查是否有session ID
             if "Mcp-Session-Id" in response.headers:
@@ -90,8 +227,6 @@ class HTTPMCPSession:
             return result.get("result", {})
         except requests.exceptions.RequestException as e:
             raise Exception(f"HTTP Error: {e}")
-        except json.JSONDecodeError as e:
-            raise Exception(f"JSON Decode Error: {e}")
     
     async def initialize(self):
         """初始化MCP连接"""
